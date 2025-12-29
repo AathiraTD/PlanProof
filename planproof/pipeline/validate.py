@@ -4,6 +4,7 @@ Validate module: Apply deterministic validation rules to extracted fields.
 
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 
 from planproof.db import Database, Document, ValidationResult, ValidationStatus
 from planproof.pipeline.extract import get_extraction_result
@@ -277,4 +278,137 @@ def _get_default_validation_rules() -> Dict[str, Dict[str, Any]]:
             "name": "Application Reference Format"
         }
     }
+
+
+# New rule catalog-based validation functions
+from planproof.rules.catalog import Rule
+
+
+def load_rule_catalog(path: str | Path = "artefacts/rule_catalog.json") -> List[Rule]:
+    """Load rule catalog from JSON file."""
+    import json as jsonlib
+    
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"Rule catalog not found: {path}\n"
+            "Please run: python scripts/build_rule_catalog.py"
+        )
+    
+    data = jsonlib.loads(p.read_text(encoding="utf-8"))
+    rules = []
+    for r in data.get("rules", []):
+        # Rehydrate Rule from dict
+        from planproof.rules.catalog import EvidenceExpectation
+        ev_dict = r.get("evidence", {})
+        evidence = EvidenceExpectation(
+            source_types=ev_dict.get("source_types", []),
+            keywords=ev_dict.get("keywords", []),
+            min_confidence=ev_dict.get("min_confidence", 0.6)
+        )
+        rules.append(
+            Rule(
+                rule_id=r["rule_id"],
+                title=r.get("title", ""),
+                description=r.get("description", ""),
+                required_fields=r.get("required_fields", []),
+                evidence=evidence,
+                severity=r.get("severity", "error"),
+                applies_to=r.get("applies_to", []),
+                tags=r.get("tags", [])
+            )
+        )
+    return rules
+
+
+def validate_extraction(
+    extraction: Dict[str, Any],
+    rules: List[Rule],
+    *,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Deterministic MVP:
+    - expects extraction["fields"] dict (even if sparse) + extraction["evidence_index"]
+    - checks required_fields presence/non-empty
+    - emits findings and whether LLM gate is needed
+    """
+    context = context or {}
+    fields: Dict[str, Any] = extraction.get("fields", {}) or {}
+    evidence_index: Dict[str, Any] = extraction.get("evidence_index", {}) or {}
+
+    findings: List[Dict[str, Any]] = []
+    needs_llm = False
+
+    for rule in rules:
+        missing = []
+        for f in rule.required_fields:
+            v = fields.get(f)
+            if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, list) and len(v) == 0):
+                missing.append(f)
+
+        if missing:
+            status = "needs_review"
+            if rule.severity == "error":
+                needs_llm = True
+            # Find evidence snippets for missing fields (page numbers + snippets)
+            evidence_snippets = []
+            for ev_key, ev_data in evidence_index.items():
+                # Handle both field-specific evidence (list) and general text blocks (dict)
+                if isinstance(ev_data, list):
+                    # Field-specific evidence: list of dicts
+                    for ev_item in ev_data[:3]:  # Top 3 snippets
+                        page_num = ev_item.get("page")
+                        snippet = ev_item.get("snippet", "")
+                        if page_num and snippet:
+                            evidence_snippets.append({
+                                "evidence_key": ev_key,
+                                "page": page_num,
+                                "snippet": snippet
+                            })
+                elif isinstance(ev_data, dict):
+                    # General text block or table
+                    page_num = ev_data.get("page_number")
+                    snippet = ev_data.get("snippet", ev_data.get("content", ""))[:100]
+                    if page_num and snippet:
+                        evidence_snippets.append({
+                            "evidence_key": ev_key,
+                            "page": page_num,
+                            "snippet": snippet
+                        })
+            
+            findings.append({
+                "rule_id": rule.rule_id,
+                "severity": rule.severity,
+                "status": status,
+                "message": f"Missing required fields: {', '.join(missing)}",
+                "required_fields": rule.required_fields,
+                "missing_fields": missing,
+                "evidence": {
+                    "expected_sources": rule.evidence.source_types,
+                    "keywords": rule.evidence.keywords,
+                    "available_evidence_keys": list(evidence_index.keys()),
+                    "evidence_snippets": evidence_snippets[:5]  # Top 5 snippets with page numbers
+                },
+            })
+        else:
+            findings.append({
+                "rule_id": rule.rule_id,
+                "severity": rule.severity,
+                "status": "pass",
+                "message": "All required fields present.",
+                "required_fields": rule.required_fields,
+                "missing_fields": [],
+                "evidence": {"available_evidence_keys": list(evidence_index.keys())},
+            })
+
+    summary = {
+        "rule_count": len(rules),
+        "pass": sum(1 for f in findings if f["status"] == "pass"),
+        "needs_review": sum(1 for f in findings if f["status"] == "needs_review"),
+        "fail": sum(1 for f in findings if f["status"] == "fail"),
+        "needs_llm": needs_llm,
+    }
+
+    return {"summary": summary, "findings": findings, "context": context}
 

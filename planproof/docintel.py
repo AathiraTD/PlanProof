@@ -48,9 +48,13 @@ class DocumentIntelligence:
             - metadata: Document metadata (page count, model used, etc.)
         """
         try:
+            # Use the correct API signature for azure-ai-documentintelligence 1.0.2
+            # body is a required positional argument, content_type goes in headers
+            from io import BytesIO
+            
             poller = self.client.begin_analyze_document(
                 model_id=model,
-                analyze_request=pdf_bytes,
+                body=BytesIO(pdf_bytes),
                 content_type="application/pdf"
             )
             result = poller.result()

@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "source": "validation_requirements.md",
+  "rule_count": 3,
+  "rules": [
+    {
+      "rule_id": "R1",
+      "title": "Site Address Validation",
+      "description": "All planning applications must include a valid site address.",
+      "required_fields": [
+        "site_address"
+      ],
+      "evidence": {
+        "source_types": [
+          "application_form",
+          "site_plan"
+        ],
+        "keywords": [
+          "address",
+          "postcode",
+          "location"
+        ],
+        "min_confidence": 0.6
+      },
+      "severity": "error",
+      "applies_to": [],
+      "tags": []
+    },
+    {
+      "rule_id": "R2",
+      "title": "Proposed Use Validation",
+      "description": "The proposed use or development type must be clearly stated.",
+      "required_fields": [
+        "proposed_use"
+      ],
+      "evidence": {
+        "source_types": [
+          "application_form",
+          "design_statement"
+        ],
+        "keywords": [
+          "use",
+          "development",
+          "proposal"
+        ],
+        "min_confidence": 0.6
+      },
+      "severity": "error",
+      "applies_to": [],
+      "tags": []
+    },
+    {
+      "rule_id": "R3",
+      "title": "Application Reference",
+      "description": "Application reference must follow the standard format.",
+      "required_fields": [
+        "application_ref"
+      ],
+      "evidence": {
+        "source_types": [
+          "application_form"
+        ],
+        "keywords": [],
+        "min_confidence": 0.6
+      },
+      "severity": "warning",
+      "applies_to": [],
+      "tags": []
+    }
+  ]
+}

@@ -3,6 +3,7 @@ Ingest module: Upload PDFs to blob storage and create database records.
 """
 
 import os
+import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -53,6 +54,10 @@ def ingest_pdf(
     if not pdf_path_obj.suffix.lower() == ".pdf":
         raise ValueError(f"File must be a PDF: {pdf_path}")
 
+    # Compute content hash for deduplication
+    pdf_bytes = pdf_path_obj.read_bytes()
+    content_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
     # Get or create application
     application = db.get_application_by_ref(application_ref)
     if application is None:
@@ -62,14 +67,34 @@ def ingest_pdf(
             application_date=application_date
         )
 
+    # Check if document with same hash already exists
+    session = db.get_session()
+    try:
+        existing_doc = session.query(Document).filter(Document.content_hash == content_hash).first()
+        if existing_doc:
+            # Link existing document to this application if not already linked
+            if existing_doc.application_id != application.id:
+                existing_doc.application_id = application.id
+                session.commit()
+            return {
+                "application_id": application.id,
+                "document_id": existing_doc.id,
+                "blob_uri": existing_doc.blob_uri,
+                "filename": existing_doc.filename,
+                "duplicate": True
+            }
+    finally:
+        session.close()
+
     # Upload PDF to blob storage
     blob_uri = storage_client.upload_pdf(pdf_path, blob_name=blob_name)
 
-    # Create document record
+    # Create document record with content hash
     document = db.create_document(
         application_id=application.id,
         blob_uri=blob_uri,
-        filename=pdf_path_obj.name
+        filename=pdf_path_obj.name,
+        content_hash=content_hash
     )
 
     return {

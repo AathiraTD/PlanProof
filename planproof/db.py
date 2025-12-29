@@ -2,7 +2,7 @@
 Database helpers and table definitions for PostgreSQL with PostGIS.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
 import json
@@ -51,6 +51,7 @@ class Document(Base):
     application_id = Column(Integer, ForeignKey("applications.id"), nullable=False, index=True)
     blob_uri = Column(String(500), nullable=False, unique=True, index=True)
     filename = Column(String(255), nullable=False)
+    content_hash = Column(String(64), nullable=True, unique=True, index=True)  # SHA256 hash for deduplication
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     processed_at = Column(DateTime, nullable=True)
     page_count = Column(Integer, nullable=True)
@@ -71,7 +72,7 @@ class Artefact(Base):
     artefact_type = Column(String(50), nullable=False)  # e.g., "extracted_layout", "structured_data"
     blob_uri = Column(String(500), nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    metadata = Column(JSON, nullable=True)  # Additional metadata about the artefact
+    artefact_metadata = Column(JSON, nullable=True)  # Additional metadata about the artefact (renamed from metadata to avoid SQLAlchemy conflict)
 
     # Relationships
     document = relationship("Document", back_populates="artefacts")
@@ -112,7 +113,7 @@ class Run(Base):
     completed_at = Column(DateTime, nullable=True)
     status = Column(String(20), nullable=False, default="running")  # running, completed, failed
     error_message = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)  # Additional run context
+    run_metadata = Column(JSON, nullable=True)  # Additional run context (renamed from metadata to avoid SQLAlchemy conflict)
 
 
 class Database:
@@ -122,6 +123,11 @@ class Database:
         """Initialize database connection."""
         settings = get_settings()
         self.database_url = database_url or settings.database_url
+        # Ensure we use psycopg (psycopg3) driver, not psycopg2
+        if self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        elif self.database_url.startswith("postgres://"):
+            self.database_url = self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
         self.engine = create_engine(self.database_url, echo=False)
         self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
 
@@ -184,7 +190,8 @@ class Database:
         blob_uri: str,
         filename: str,
         page_count: Optional[int] = None,
-        docintel_model: Optional[str] = None
+        docintel_model: Optional[str] = None,
+        content_hash: Optional[str] = None
     ) -> Document:
         """Create a new document record."""
         session = self.get_session()
@@ -194,7 +201,8 @@ class Database:
                 blob_uri=blob_uri,
                 filename=filename,
                 page_count=page_count,
-                docintel_model=docintel_model
+                docintel_model=docintel_model,
+                content_hash=content_hash
             )
             session.add(doc)
             session.commit()
@@ -208,6 +216,102 @@ class Database:
         session = self.get_session()
         try:
             return session.query(Document).filter(Document.blob_uri == blob_uri).first()
+        finally:
+            session.close()
+
+    def create_run(
+        self,
+        run_type: str,
+        document_id: Optional[int] = None,
+        application_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a new run record."""
+        session = self.get_session()
+        try:
+            run = Run(
+                run_type=run_type,
+                document_id=document_id,
+                application_id=application_id,
+                run_metadata=metadata or {}
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            return {
+                "id": run.id,
+                "run_type": run.run_type,
+                "document_id": run.document_id,
+                "application_id": run.application_id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "status": run.status
+            }
+        finally:
+            session.close()
+
+    def create_artefact_record(
+        self,
+        document_id: int,
+        artefact_type: str,
+        blob_uri: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a new artefact record."""
+        session = self.get_session()
+        try:
+            artefact = Artefact(
+                document_id=document_id,
+                artefact_type=artefact_type,
+                blob_uri=blob_uri,
+                artefact_metadata=metadata or {}
+            )
+            session.add(artefact)
+            session.commit()
+            session.refresh(artefact)
+            return {
+                "id": artefact.id,
+                "document_id": artefact.document_id,
+                "artefact_type": artefact.artefact_type,
+                "blob_uri": artefact.blob_uri,
+                "created_at": artefact.created_at.isoformat() if artefact.created_at else None
+            }
+        finally:
+            session.close()
+
+    def link_document_to_run(self, run_id: int, document_id: int):
+        """Link a document to a run by updating the run's document_id."""
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                run.document_id = document_id
+                session.commit()
+        finally:
+            session.close()
+
+    def update_run(
+        self,
+        run_id: int,
+        status: Optional[str] = None,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Update a run record."""
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                if status:
+                    run.status = status
+                if error_message:
+                    run.error_message = error_message
+                if metadata:
+                    # Merge with existing metadata
+                    existing = run.run_metadata or {}
+                    existing.update(metadata)
+                    run.run_metadata = existing
+                run.completed_at = datetime.now(timezone.utc)
+                session.commit()
         finally:
             session.close()
 

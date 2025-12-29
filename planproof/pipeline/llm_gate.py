@@ -218,3 +218,143 @@ def _get_validation_rules_for_field(field_name: str) -> str:
 
     return rules.get(field_name, f"Field {field_name} must be valid and complete")
 
+
+# Field ownership: which doc types can extract which fields
+DOC_FIELD_OWNERSHIP = {
+    "application_form": {"application_ref", "site_address", "proposed_use", "applicant_name", "agent_name"},
+    "site_plan": {"site_address", "proposed_use"},
+    "drawing": {"proposed_use"},  # Drawings might have use descriptions
+    "design_statement": {"proposed_use", "site_address"},
+    "unknown": {"site_address", "proposed_use"},  # Fallback
+}
+
+
+def should_trigger_llm(
+    validation: Dict[str, Any],
+    extraction: Dict[str, Any],
+    resolved_fields: Optional[Dict[str, Any]] = None
+) -> bool:
+    """
+    Check if LLM resolution should be triggered based on validation results.
+    
+    Only triggers if:
+    - Missing field is extractable from THIS doc type (field ownership)
+    - Doc has enough text coverage
+    - At least one rule is blocking (severity error) - warnings don't trigger
+    - Field hasn't already been resolved earlier in the run/application
+    """
+    resolved_fields = resolved_fields or {}
+    
+    # Check if needs_llm flag is set
+    if not validation.get("summary", {}).get("needs_llm"):
+        return False
+    
+    # Get document type
+    doc_type = extraction.get("fields", {}).get("document_type", "unknown")
+    
+    # Get missing fields from validation findings (only errors, not warnings)
+    missing_fields = []
+    has_error_severity = False
+    
+    for finding in validation.get("findings", []):
+        # Only consider error severity for LLM trigger
+        if finding.get("severity") != "error":
+            continue
+            
+        if finding.get("status") in ["needs_review", "fail"]:
+            missing = finding.get("missing_fields", [])
+            # Skip if field already resolved
+            missing = [f for f in missing if f not in resolved_fields]
+            missing_fields.extend(missing)
+            has_error_severity = True
+    
+    if not missing_fields or not has_error_severity:
+        return False
+    
+    # Check field ownership: only extract fields this doc type can provide
+    allowed_fields = DOC_FIELD_OWNERSHIP.get(doc_type, set())
+    missing_allowed = [f for f in missing_fields if f in allowed_fields]
+    
+    if not missing_allowed:
+        return False
+    
+    # Check text coverage (at least some text blocks)
+    text_blocks = extraction.get("text_blocks", [])
+    if len(text_blocks) < 5:  # Too little text to justify LLM
+        return False
+    
+    return True
+
+
+def build_llm_prompt(extraction: Dict[str, Any], validation: Dict[str, Any]) -> Dict[str, Any]:
+    """Build LLM prompt for resolving missing fields."""
+    # Keep it schema-bound: ask for missing fields only.
+    missing_fields: List[str] = []
+    for f in validation.get("findings", []):
+        missing_fields.extend(f.get("missing_fields", []))
+    missing_fields = sorted(set(missing_fields))
+
+    return {
+        "task": "Fill missing structured fields from extracted evidence only. If not found, return null.",
+        "missing_fields": missing_fields,
+        "extraction_fields": extraction.get("fields", {}),
+        "evidence_index": extraction.get("evidence_index", {}),
+        "return_schema": {
+            "filled_fields": {k: "string|number|object|null" for k in missing_fields},
+            "notes": "string",
+            "citations": [
+                {
+                    "field": "string",
+                    "evidence_key": "string",
+                    "page": "number",
+                    "quote": "string"
+                }
+            ],
+        },
+    }
+
+
+def resolve_with_llm_new(extraction: Dict[str, Any], validation: Dict[str, Any], aoai_client: Optional[AzureOpenAIClient] = None) -> Dict[str, Any]:
+    """
+    Use LLM to resolve missing fields from extraction and validation results.
+    
+    Args:
+        extraction: Extraction result dictionary
+        validation: Validation result dictionary
+        aoai_client: Optional AzureOpenAIClient instance
+        
+    Returns:
+        Dictionary with triggered flag, request, response, and gate logging info
+    """
+    if aoai_client is None:
+        aoai_client = AzureOpenAIClient()
+    
+    # Collect missing fields and affected rule IDs for logging
+    missing_fields: List[str] = []
+    affected_rule_ids: List[str] = []
+    
+    for finding in validation.get("findings", []):
+        if finding.get("status") in ["needs_review", "fail"]:
+            missing = finding.get("missing_fields", [])
+            missing_fields.extend(missing)
+            rule_id = finding.get("rule_id")
+            if rule_id:
+                affected_rule_ids.append(rule_id)
+    
+    missing_fields = sorted(set(missing_fields))
+    affected_rule_ids = sorted(set(affected_rule_ids))
+    
+    prompt_obj = build_llm_prompt(extraction, validation)
+    resp = aoai_client.chat_json(prompt_obj)  # returns parsed JSON dict
+    
+    return {
+        "triggered": True,
+        "gate_reason": {
+            "missing_fields": missing_fields,
+            "affected_rule_ids": affected_rule_ids,
+            "validation_summary": validation.get("summary", {})
+        },
+        "request": prompt_obj,
+        "response": resp,
+    }
+

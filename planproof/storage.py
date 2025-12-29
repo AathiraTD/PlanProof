@@ -79,18 +79,21 @@ class StorageClient:
         blob_client.upload_blob(pdf_bytes, overwrite=True)
         return self.get_blob_uri(self.inbox_container, blob_name)
 
-    def write_artefact(self, artefact_data: dict, artefact_name: str) -> str:
+    def write_artefact(self, artefact_data: dict, artefact_name: str, overwrite: bool = True) -> str:
         """
-        Write a JSON artefact to the artefacts container.
+        Write a JSON artefact to the artefacts container atomically.
 
         Args:
             artefact_data: Dictionary to serialize as JSON
             artefact_name: Name for the artefact blob (should include .json extension)
+            overwrite: If False, raises error if blob exists (default: True for backward compatibility)
 
         Returns:
             Blob URI
         """
-        import json
+        import json as json_module
+        from azure.storage.blob import ContentSettings
+        from azure.core.exceptions import ResourceExistsError
 
         blob_name = artefact_name.lstrip("/")
         blob_client = self.client.get_blob_client(
@@ -98,8 +101,15 @@ class StorageClient:
             blob=blob_name
         )
 
-        json_bytes = json.dumps(artefact_data, indent=2, ensure_ascii=False).encode("utf-8")
-        blob_client.upload_blob(json_bytes, overwrite=True, content_settings={"content_type": "application/json"})
+        # Check if blob exists (unless overwrite is True)
+        if not overwrite and self.blob_exists(self.artefacts_container, blob_name):
+            raise ResourceExistsError(
+                f"Blob already exists: {blob_name}. Use overwrite=True to replace."
+            )
+
+        json_bytes = json_module.dumps(artefact_data, indent=2, ensure_ascii=False).encode("utf-8")
+        content_settings = ContentSettings(content_type="application/json")
+        blob_client.upload_blob(json_bytes, overwrite=overwrite, content_settings=content_settings)
 
         return self.get_blob_uri(self.artefacts_container, blob_name)
 
@@ -165,4 +175,36 @@ class StorageClient:
             return True
         except AzureError:
             return False
+
+    def write_json_blob(self, container: str, blob_path: str, obj: dict, overwrite: bool = False) -> str:
+        """
+        Write a JSON object to a blob atomically (wrapper for write_artefact with container support).
+
+        Args:
+            container: Container name (e.g., "artefacts")
+            blob_path: Blob path/name
+            obj: Dictionary to serialize as JSON
+            overwrite: If False, raises error if blob exists (default: False for atomicity)
+
+        Returns:
+            Blob URI
+        """
+        import json as json_module
+        from azure.storage.blob import ContentSettings
+        from azure.core.exceptions import ResourceExistsError
+        
+        blob_path = blob_path.lstrip("/")
+        blob_client = self.client.get_blob_client(container=container, blob=blob_path)
+        
+        # Check if blob exists (unless overwrite is True)
+        if not overwrite and self.blob_exists(container, blob_path):
+            raise ResourceExistsError(
+                f"Blob already exists: {blob_path}. Use overwrite=True to replace."
+            )
+        
+        json_bytes = json_module.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")
+        content_settings = ContentSettings(content_type="application/json")
+        blob_client.upload_blob(json_bytes, overwrite=overwrite, content_settings=content_settings)
+        
+        return self.get_blob_uri(container, blob_path)
 

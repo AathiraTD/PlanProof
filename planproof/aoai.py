@@ -111,15 +111,15 @@ Please resolve this field and provide your reasoning."""
 
         # Parse the response
         content = response.choices[0].message.content
-        import json
+        import json as jsonlib
         try:
-            result = json.loads(content)
+            result = jsonlib.loads(content)
             return {
                 "resolved_value": result.get("resolved_value"),
                 "confidence": float(result.get("confidence", 0.5)),
                 "reasoning": result.get("reasoning", "")
             }
-        except json.JSONDecodeError:
+        except jsonlib.JSONDecodeError:
             # Fallback if JSON parsing fails
             return {
                 "resolved_value": content.strip() if content else None,
@@ -179,20 +179,56 @@ Please validate this field and provide your assessment."""
         )
 
         content = response.choices[0].message.content
-        import json
+        import json as jsonlib
         try:
-            result = json.loads(content)
+            result = jsonlib.loads(content)
             return {
                 "is_valid": result.get("is_valid", False),
                 "confidence": float(result.get("confidence", 0.5)),
                 "reasoning": result.get("reasoning", ""),
                 "suggested_value": result.get("suggested_value")
             }
-        except json.JSONDecodeError:
+        except jsonlib.JSONDecodeError:
             return {
                 "is_valid": False,
                 "confidence": 0.3,
                 "reasoning": "LLM response could not be parsed",
                 "suggested_value": None
+            }
+
+    def chat_json(self, payload: dict) -> dict:
+        """
+        Call AOAI with a JSON-structured prompt and return parsed JSON response.
+
+        Args:
+            payload: Dictionary containing the task/request to send to LLM
+
+        Returns:
+            Parsed JSON dictionary from LLM response
+        """
+        system_prompt = """You are a planning validation assistant. Analyze the provided task and return a valid JSON response following the specified schema.
+
+Be precise and only extract information that is clearly present in the evidence provided."""
+
+        import json as jsonlib
+        user_prompt = jsonlib.dumps(payload, indent=2)
+
+        response = self.chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+
+        content = response.choices[0].message.content
+        import json as jsonlib
+        try:
+            return jsonlib.loads(content)
+        except jsonlib.JSONDecodeError:
+            return {
+                "error": "LLM response could not be parsed as JSON",
+                "raw_response": content
             }
 

@@ -2,7 +2,7 @@
 Extract module: Use Document Intelligence to extract structured data from documents.
 """
 
-import json
+import json as jsonlib
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -70,15 +70,18 @@ def extract_document(
         document.processed_at = datetime.utcnow()
 
         # Store extraction result as JSON artefact
+        # Ensure the result is fully serializable (deep copy to remove any object references)
+        import copy as copy_module
+        extraction_result_clean = copy_module.deepcopy(extraction_result)
         artefact_name = f"extracted_layout_{document_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
-        artefact_blob_uri = storage_client.write_artefact(extraction_result, artefact_name)
+        artefact_blob_uri = storage_client.write_artefact(extraction_result_clean, artefact_name)
 
         # Create artefact record
         artefact = Artefact(
             document_id=document_id,
             artefact_type="extracted_layout",
             blob_uri=artefact_blob_uri,
-            metadata={
+            artefact_metadata={
                 "model": model,
                 "extracted_at": datetime.utcnow().isoformat()
             }
@@ -143,8 +146,96 @@ def get_extraction_result(
         blob_name = blob_uri_parts[2]
 
         artefact_bytes = storage_client.download_blob(container, blob_name)
-        return json.loads(artefact_bytes.decode("utf-8"))
+        return jsonlib.loads(artefact_bytes.decode("utf-8"))
 
     finally:
         session.close()
+
+
+def extract_from_pdf_bytes(
+    pdf_bytes: bytes,
+    document_meta: Dict[str, Any],
+    model: str = "prebuilt-layout",
+    docintel: Optional[DocumentIntelligence] = None
+) -> Dict[str, Any]:
+    """
+    Extract structured data from PDF bytes (for use in end-to-end pipeline).
+
+    Args:
+        pdf_bytes: PDF file content as bytes
+        document_meta: Dictionary with document metadata (e.g., from ingest)
+        model: Document Intelligence model to use
+        docintel: Optional DocumentIntelligence instance
+
+    Returns:
+        Extraction result dictionary with fields and evidence_index
+    """
+    if docintel is None:
+        docintel = DocumentIntelligence()
+
+    # Analyze document with Document Intelligence
+    extraction_result = docintel.analyze_document(pdf_bytes, model=model)
+
+    # Use field mapper to extract structured fields
+    from planproof.pipeline.field_mapper import map_fields
+    
+    mapped = map_fields(extraction_result)
+    fields = mapped["fields"]
+    field_evidence = mapped["evidence_index"]
+    
+    # Build general evidence_index for text blocks and tables
+    evidence_index = {}
+    
+    # Extract text blocks as evidence with page numbers and snippets
+    for i, block in enumerate(extraction_result.get("text_blocks", [])):
+        content = block.get("content", "")
+        page_num = block.get("page_number")
+        # Create snippet (first 100 chars)
+        snippet = content[:100] + "..." if len(content) > 100 else content
+        
+        evidence_key = f"text_block_{i}"
+        evidence_index[evidence_key] = {
+            "type": "text_block",
+            "content": content,
+            "snippet": snippet,
+            "page_number": page_num,
+            "bounding_box": block.get("bounding_box")
+        }
+        
+        # Add index to block for field mapper reference
+        block["index"] = i
+
+    # Extract tables as evidence with page numbers
+    for i, table in enumerate(extraction_result.get("tables", [])):
+        page_num = table.get("page_number")
+        # Create snippet from first few cells
+        cells = table.get("cells", [])
+        cell_snippets = []
+        for cell in cells[:5]:  # First 5 cells
+            if cell.get("content"):
+                cell_snippets.append(cell["content"][:50])
+        snippet = " | ".join(cell_snippets) if cell_snippets else ""
+        
+        evidence_key = f"table_{i}"
+        evidence_index[evidence_key] = {
+            "type": "table",
+            "row_count": table.get("row_count"),
+            "column_count": table.get("column_count"),
+            "page_number": page_num,
+            "snippet": snippet,
+            "cells": cells
+        }
+    
+    # Merge field-specific evidence into general evidence_index
+    for field_name, ev_list in field_evidence.items():
+        evidence_index[field_name] = ev_list
+
+    return {
+        "fields": fields,
+        "evidence_index": evidence_index,
+        "metadata": extraction_result.get("metadata", {}),
+        "text_blocks": extraction_result.get("text_blocks", []),
+        "tables": extraction_result.get("tables", []),
+        "page_anchors": extraction_result.get("page_anchors", {})
+    }
 
