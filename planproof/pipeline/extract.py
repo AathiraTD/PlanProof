@@ -7,6 +7,7 @@ from __future__ import annotations
 import json as jsonlib
 import logging
 import time
+from collections import OrderedDict
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 
@@ -14,7 +15,30 @@ from planproof.docintel import DocumentIntelligence
 from planproof.config import get_settings
 
 LOGGER = logging.getLogger(__name__)
-_EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
+_EXTRACTION_CACHE_MAX_SIZE = 128
+
+
+class ExtractionCache:
+    def __init__(self, max_size: int) -> None:
+        self._max_size = max_size
+        self._data: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        if key not in self._data:
+            return None
+        value = self._data.pop(key)
+        self._data[key] = value
+        return value
+
+    def set(self, key: str, value: Dict[str, Any]) -> None:
+        if key in self._data:
+            self._data.pop(key)
+        self._data[key] = value
+        if len(self._data) > self._max_size:
+            self._data.popitem(last=False)
+
+
+_EXTRACTION_CACHE = ExtractionCache(max_size=_EXTRACTION_CACHE_MAX_SIZE)
 
 if TYPE_CHECKING:
     from planproof.storage import StorageClient
@@ -234,13 +258,23 @@ def get_extraction_result(
 
         settings = get_settings()
         cache_key = artefact.blob_uri
-        if settings.enable_extraction_cache and cache_key in _EXTRACTION_CACHE:
-            return _EXTRACTION_CACHE[cache_key]
+        if settings.enable_extraction_cache:
+            cached = _EXTRACTION_CACHE.get(cache_key)
+            if cached is not None:
+                LOGGER.debug(
+                    "extraction_cache_hit",
+                    extra={"document_id": document_id, "cache_key": cache_key},
+                )
+                return cached
+            LOGGER.debug(
+                "extraction_cache_miss",
+                extra={"document_id": document_id, "cache_key": cache_key},
+            )
 
         artefact_bytes = storage_client.download_blob(container, blob_name)
         result = jsonlib.loads(artefact_bytes.decode("utf-8"))
         if settings.enable_extraction_cache:
-            _EXTRACTION_CACHE[cache_key] = result
+            _EXTRACTION_CACHE.set(cache_key, result)
         return result
 
     finally:
