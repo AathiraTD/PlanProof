@@ -58,14 +58,7 @@ def _is_noise(s: str) -> bool:
 
 def looks_like_phone(s: str) -> bool:
     """Check if string looks like a phone number (not a date)."""
-    # Reject if it matches date pattern
-    if DATE_LIKE.search(s):
-        return False
-    # Phone should have digits, not just date separators
-    digits = sum(1 for c in s if c.isdigit())
-    if digits < 8:  # Too short
-        return False
-    return True
+    return not DATE_LIKE.search(s)
 
 
 def pick_site_address(blocks: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
