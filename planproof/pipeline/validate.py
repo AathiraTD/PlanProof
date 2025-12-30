@@ -5,12 +5,14 @@ Validate module: Apply deterministic validation rules to extracted fields.
 from __future__ import annotations
 
 from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
+import logging
 from datetime import datetime
 from pathlib import Path
 
 if TYPE_CHECKING:
     from planproof.db import Database, ValidationCheck, ValidationStatus
 
+LOGGER = logging.getLogger(__name__)
 
 def validate_document(
     document_id: int,
@@ -47,10 +49,12 @@ def validate_document(
     # Extract text content for field matching
     all_text = _extract_all_text(extraction_result)
 
+    from planproof.config import get_settings
+
     # Apply validation rules
     validation_results: List[Dict[str, Any]] = []
     validation_rows = []
-    session = db.get_session()
+    session = db.get_session() if get_settings().enable_db_writes else None
 
     try:
         for field_name, rule in validation_rules.items():
@@ -61,32 +65,36 @@ def validate_document(
                 all_text=all_text
             )
 
-            # Create validation result record
-            validation_result = ValidationResult(
-                document_id=document_id,
-                field_name=field_name,
-                status=result["status"],
-                confidence=result.get("confidence"),
-                extracted_value=result.get("extracted_value"),
-                expected_value=result.get("expected_value"),
-                rule_name=result.get("rule_name"),
-                error_message=result.get("error_message"),
-                evidence_page=result.get("evidence_page"),
-                evidence_location=result.get("evidence_location")
-            )
-            session.add(validation_result)
-            validation_rows.append(validation_result)
+            if session:
+                # Create validation result record
+                validation_result = ValidationResult(
+                    document_id=document_id,
+                    field_name=field_name,
+                    status=result["status"],
+                    confidence=result.get("confidence"),
+                    extracted_value=result.get("extracted_value"),
+                    expected_value=result.get("expected_value"),
+                    rule_name=result.get("rule_name"),
+                    error_message=result.get("error_message"),
+                    evidence_page=result.get("evidence_page"),
+                    evidence_location=result.get("evidence_location")
+                )
+                session.add(validation_result)
+                validation_rows.append(validation_result)
             validation_results.append(result)
 
-        session.commit()
+        if session:
+            session.commit()
 
         # Refresh to get IDs
-        for row, result in zip(validation_rows, validation_results, strict=False):
-            session.refresh(row)
-            result["id"] = row.id
+        if session:
+            for row, result in zip(validation_rows, validation_results, strict=False):
+                session.refresh(row)
+                result["id"] = row.id
 
     finally:
-        session.close()
+        if session:
+            session.close()
 
     return validation_results
 
@@ -379,136 +387,150 @@ def validate_extraction(
     if write_to_tables and db:
         session = db.get_session()
 
-    for rule in rules:
-        # Skip rule if it doesn't apply to this document type
-        if rule.applies_to and len(rule.applies_to) > 0:
-            if document_type not in rule.applies_to:
-                # Rule doesn't apply to this document type - skip it
-                continue
-        missing = []
-        found_any = False
-        
-        # Check required fields
-        for f in rule.required_fields:
-            v = fields.get(f)
-            if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, list) and len(v) == 0):
-                missing.append(f)
-            else:
-                found_any = True  # At least one field is present
-        
-        # For OR logic (required_fields_any=True): pass if ANY field is present
-        # For AND logic (required_fields_any=False): fail if ANY field is missing
-        if rule.required_fields_any:
-            # OR logic: if any field is found, rule passes
-            if found_any:
-                missing = []  # Clear missing - rule passes
-            # else: missing contains all fields (rule fails)
-        # else: AND logic - missing contains fields that are missing (rule fails if any missing)
+    try:
+        for rule in rules:
+            # Skip rule if it doesn't apply to this document type
+            if rule.applies_to and len(rule.applies_to) > 0:
+                if document_type not in rule.applies_to:
+                    # Rule doesn't apply to this document type - skip it
+                    continue
 
-        if missing:
-            status = "needs_review"
-            if rule.severity == "error":
-                needs_llm = True
-            # Find evidence snippets for missing fields (page numbers + snippets)
-            evidence_snippets = []
-            evidence_ids = []
-            for ev_key, ev_data in evidence_index.items():
-                # Handle both field-specific evidence (list) and general text blocks (dict)
-                if isinstance(ev_data, list):
-                    # Field-specific evidence: list of dicts
-                    for ev_item in ev_data[:3]:  # Top 3 snippets
-                        page_num = ev_item.get("page")
-                        snippet = ev_item.get("snippet", "")
+            missing = []
+            found_any = False
+
+            # Check required fields
+            for f in rule.required_fields:
+                v = fields.get(f)
+                if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, list) and len(v) == 0):
+                    missing.append(f)
+                else:
+                    found_any = True  # At least one field is present
+
+            # For OR logic (required_fields_any=True): pass if ANY field is present
+            # For AND logic (required_fields_any=False): fail if ANY field is missing
+            if rule.required_fields_any:
+                # OR logic: if any field is found, rule passes
+                if found_any:
+                    missing = []  # Clear missing - rule passes
+                # else: missing contains all fields (rule fails)
+            # else: AND logic - missing contains fields that are missing (rule fails if any missing)
+
+            if missing:
+                status = "needs_review"
+                if rule.severity == "error":
+                    needs_llm = True
+                # Find evidence snippets for missing fields (page numbers + snippets)
+                evidence_snippets = []
+                evidence_ids = []
+                for ev_key, ev_data in evidence_index.items():
+                    # Handle both field-specific evidence (list) and general text blocks (dict)
+                    if isinstance(ev_data, list):
+                        # Field-specific evidence: list of dicts
+                        for ev_item in ev_data[:3]:  # Top 3 snippets
+                            page_num = ev_item.get("page")
+                            snippet = ev_item.get("snippet", "")
+                            if page_num and snippet:
+                                evidence_snippets.append({
+                                    "evidence_key": ev_key,
+                                    "page": page_num,
+                                    "snippet": snippet
+                                })
+                    elif isinstance(ev_data, dict):
+                        # General text block or table
+                        page_num = ev_data.get("page_number")
+                        snippet = ev_data.get("snippet", ev_data.get("content", ""))[:100]
                         if page_num and snippet:
                             evidence_snippets.append({
                                 "evidence_key": ev_key,
                                 "page": page_num,
                                 "snippet": snippet
                             })
-                elif isinstance(ev_data, dict):
-                    # General text block or table
-                    page_num = ev_data.get("page_number")
-                    snippet = ev_data.get("snippet", ev_data.get("content", ""))[:100]
-                    if page_num and snippet:
-                        evidence_snippets.append({
-                            "evidence_key": ev_key,
-                            "page": page_num,
-                            "snippet": snippet
-                        })
-            
-            finding = {
-                "rule_id": rule.rule_id,
-                "severity": rule.severity,
-                "status": status,
-                "message": f"Missing required fields: {', '.join(missing)}",
-                "required_fields": rule.required_fields,
-                "missing_fields": missing,
-                "evidence": {
-                    "expected_sources": rule.evidence.source_types,
-                    "keywords": rule.evidence.keywords,
-                    "available_evidence_keys": list(evidence_index.keys()),
-                    "evidence_snippets": evidence_snippets[:5]  # Top 5 snippets with page numbers
-                },
-            }
-            findings.append(finding)
-            
-            # Write to ValidationCheck table if enabled
-            if session:
-                try:
-                    from planproof.db import Evidence
-                    # Get evidence IDs for this rule
-                    for ev_key in evidence_index.keys():
-                        evidence = session.query(Evidence).filter(
-                            Evidence.document_id == document_id,
-                            Evidence.evidence_key == ev_key
-                        ).first()
-                        if evidence:
-                            evidence_ids.append(evidence.id)
 
-                    # Map status to ValidationStatus enum
-                    if status == "pass":
-                        check_status = ValidationStatus.PASS
-                    elif status == "needs_review":
-                        check_status = ValidationStatus.NEEDS_REVIEW
-                    else:
-                        check_status = ValidationStatus.FAIL
+                finding = {
+                    "rule_id": rule.rule_id,
+                    "severity": rule.severity,
+                    "status": status,
+                    "message": f"Missing required fields: {', '.join(missing)}",
+                    "required_fields": rule.required_fields,
+                    "missing_fields": missing,
+                    "evidence": {
+                        "expected_sources": rule.evidence.source_types,
+                        "keywords": rule.evidence.keywords,
+                        "available_evidence_keys": list(evidence_index.keys()),
+                        "evidence_snippets": evidence_snippets[:5]  # Top 5 snippets with page numbers
+                    },
+                }
+                findings.append(finding)
 
-                    validation_check = ValidationCheck(
-                        submission_id=submission_id,
-                        document_id=document_id,
-                        rule_id_string=rule.rule_id,
-                        status=check_status,
-                        explanation=finding["message"],
-                        evidence_ids=evidence_ids if evidence_ids else None
-                    )
-                    session.add(validation_check)
-                except Exception:
-                    pass
-        else:
-            finding = {
-                "rule_id": rule.rule_id,
-                "severity": rule.severity,
-                "status": "pass",
-                "message": "All required fields present.",
-                "required_fields": rule.required_fields,
-                "missing_fields": [],
-                "evidence": {"available_evidence_keys": list(evidence_index.keys())},
-            }
-            findings.append(finding)
-            
-            # Write to ValidationCheck table if enabled
-            if session:
-                try:
-                    validation_check = ValidationCheck(
-                        submission_id=submission_id,
-                        document_id=document_id,
-                        rule_id_string=rule.rule_id,
-                        status=ValidationStatus.PASS,
-                        explanation="All required fields present."
-                    )
-                    session.add(validation_check)
-                except Exception:
-                    pass
+                # Write to ValidationCheck table if enabled
+                if session:
+                    try:
+                        from planproof.db import Evidence
+                        # Get evidence IDs for this rule
+                        for ev_key in evidence_index.keys():
+                            evidence = session.query(Evidence).filter(
+                                Evidence.document_id == document_id,
+                                Evidence.evidence_key == ev_key
+                            ).first()
+                            if evidence:
+                                evidence_ids.append(evidence.id)
+
+                        # Map status to ValidationStatus enum
+                        if status == "pass":
+                            check_status = ValidationStatus.PASS
+                        elif status == "needs_review":
+                            check_status = ValidationStatus.NEEDS_REVIEW
+                        else:
+                            check_status = ValidationStatus.FAIL
+
+                        validation_check = ValidationCheck(
+                            submission_id=submission_id,
+                            document_id=document_id,
+                            rule_id_string=rule.rule_id,
+                            status=check_status,
+                            explanation=finding["message"],
+                            evidence_ids=evidence_ids if evidence_ids else None
+                        )
+                        session.add(validation_check)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "validation_check_write_failed",
+                            extra={"document_id": document_id, "rule_id": rule.rule_id, "error": str(exc)},
+                        )
+            else:
+                finding = {
+                    "rule_id": rule.rule_id,
+                    "severity": rule.severity,
+                    "status": "pass",
+                    "message": "All required fields present.",
+                    "required_fields": rule.required_fields,
+                    "missing_fields": [],
+                    "evidence": {"available_evidence_keys": list(evidence_index.keys())},
+                }
+                findings.append(finding)
+
+                # Write to ValidationCheck table if enabled
+                if session:
+                    try:
+                        validation_check = ValidationCheck(
+                            submission_id=submission_id,
+                            document_id=document_id,
+                            rule_id_string=rule.rule_id,
+                            status=ValidationStatus.PASS,
+                            explanation="All required fields present."
+                        )
+                        session.add(validation_check)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "validation_check_write_failed",
+                            extra={"document_id": document_id, "rule_id": rule.rule_id, "error": str(exc)},
+                        )
+
+        if session:
+            session.commit()
+    finally:
+        if session:
+            session.close()
 
     if session:
         try:

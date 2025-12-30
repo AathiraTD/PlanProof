@@ -3,6 +3,8 @@ Azure Blob Storage helpers for PDF uploads and JSON artefact storage.
 """
 
 import os
+import time
+import logging
 from typing import Optional, List
 from pathlib import Path
 from datetime import datetime
@@ -18,6 +20,7 @@ class StorageClient:
         from azure.storage.blob import BlobServiceClient
 
         settings = get_settings()
+        self._settings = settings
         conn_str = connection_string or settings.azure_storage_connection_string
         self._connection_string = conn_str
         self.client = BlobServiceClient.from_connection_string(conn_str)
@@ -25,6 +28,32 @@ class StorageClient:
         self.artefacts_container = settings.azure_storage_container_artefacts
         self.logs_container = settings.azure_storage_container_logs
         self._account_key = self._extract_account_key(conn_str)
+        self._logger = logging.getLogger(__name__)
+
+    def _with_retry(self, operation_name: str, func, *args, **kwargs):
+        max_attempts = max(1, self._settings.azure_retry_max_attempts)
+        base_delay = max(0.1, self._settings.azure_retry_base_delay_s)
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                last_error = exc
+                if attempt == max_attempts:
+                    break
+                delay = base_delay * (2 ** (attempt - 1))
+                self._logger.warning(
+                    "storage_retry",
+                    extra={
+                        "operation": operation_name,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "delay_s": delay,
+                        "error": str(exc),
+                    },
+                )
+                time.sleep(delay)
+        raise last_error
 
     def upload_pdf(self, pdf_path: str, blob_name: Optional[str] = None) -> str:
         """
@@ -58,7 +87,7 @@ class StorageClient:
         )
 
         with open(pdf_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
+            self._with_retry("upload_pdf", blob_client.upload_blob, data, overwrite=True)
 
         return self.get_blob_uri(self.inbox_container, blob_name)
 
@@ -78,7 +107,7 @@ class StorageClient:
             container=self.inbox_container,
             blob=blob_name
         )
-        blob_client.upload_blob(pdf_bytes, overwrite=True)
+        self._with_retry("upload_pdf_bytes", blob_client.upload_blob, pdf_bytes, overwrite=True)
         return self.get_blob_uri(self.inbox_container, blob_name)
 
     def write_artefact(self, artefact_data: dict, artefact_name: str, overwrite: bool = True) -> str:
@@ -111,7 +140,13 @@ class StorageClient:
 
         json_bytes = json_module.dumps(artefact_data, indent=2, ensure_ascii=False).encode("utf-8")
         content_settings = ContentSettings(content_type="application/json")
-        blob_client.upload_blob(json_bytes, overwrite=overwrite, content_settings=content_settings)
+        self._with_retry(
+            "write_artefact",
+            blob_client.upload_blob,
+            json_bytes,
+            overwrite=overwrite,
+            content_settings=content_settings,
+        )
 
         return self.get_blob_uri(self.artefacts_container, blob_name)
 
@@ -193,7 +228,10 @@ class StorageClient:
             Blob content as bytes
         """
         blob_client = self.client.get_blob_client(container=container, blob=blob_name)
-        return blob_client.download_blob().readall()
+        return self._with_retry(
+            "download_blob",
+            lambda: blob_client.download_blob().readall()
+        )
 
     def blob_exists(self, container: str, blob_name: str) -> bool:
         """
@@ -252,7 +290,13 @@ class StorageClient:
         
         json_bytes = json_module.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")
         content_settings = ContentSettings(content_type="application/json")
-        blob_client.upload_blob(json_bytes, overwrite=overwrite, content_settings=content_settings)
+        self._with_retry(
+            "write_json_blob",
+            blob_client.upload_blob,
+            json_bytes,
+            overwrite=overwrite,
+            content_settings=content_settings,
+        )
         
         return self.get_blob_uri(container, blob_path)
 

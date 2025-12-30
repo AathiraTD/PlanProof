@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from planproof.aoai import AzureOpenAIClient
     from planproof.db import Database
     from planproof.docintel import DocumentIntelligence
+from planproof.config import get_settings
 
 
 def resolve_with_llm(
@@ -170,6 +171,9 @@ def _build_document_context(
     max_blocks: int = 80
 ) -> str:
     """Build a bounded text context from extraction result for LLM."""
+    settings = get_settings()
+    max_chars = settings.llm_context_max_chars
+    max_blocks = settings.llm_context_max_blocks
     text_parts = []
 
     text_blocks = extraction_result.get("text_blocks", [])
@@ -217,6 +221,9 @@ def _get_field_context(
     max_blocks: int = 30
 ) -> str:
     """Get relevant context for a specific field with lightweight retrieval."""
+    settings = get_settings()
+    max_chars = settings.llm_field_context_max_chars
+    max_blocks = settings.llm_field_context_max_blocks
     field_hints = {
         "site_address": "Look for address information, postcodes, street names",
         "proposed_use": "Look for descriptions of proposed development, use classes",

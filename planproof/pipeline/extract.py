@@ -5,10 +5,16 @@ Extract module: Use Document Intelligence to extract structured data from docume
 from __future__ import annotations
 
 import json as jsonlib
+import logging
+import time
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 
 from planproof.docintel import DocumentIntelligence
+from planproof.config import get_settings
+
+LOGGER = logging.getLogger(__name__)
+_EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
 
 _EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -76,22 +82,41 @@ def extract_document(
         extraction_result = None
         if page_parallelism > 1:
             pdf_bytes = storage_client.download_blob(container, blob_name)
+            docintel_start = time.perf_counter()
             extraction_result = docintel.analyze_document_parallel(
                 pdf_bytes,
                 model=model,
                 pages_per_batch=pages_per_batch,
                 max_workers=page_parallelism
             )
+            extraction_result["metadata"]["docintel_ms"] = int(
+                (time.perf_counter() - docintel_start) * 1000
+            )
+            extraction_result["metadata"]["docintel_source"] = "bytes_parallel"
         elif use_url:
             try:
                 document_url = storage_client.get_blob_sas_url(container, blob_name)
+                docintel_start = time.perf_counter()
                 extraction_result = docintel.analyze_document_url(document_url, model=model)
-            except Exception:
+                extraction_result["metadata"]["docintel_ms"] = int(
+                    (time.perf_counter() - docintel_start) * 1000
+                )
+                extraction_result["metadata"]["docintel_source"] = "url"
+            except Exception as exc:
+                LOGGER.warning(
+                    "docintel_url_fallback",
+                    extra={"document_id": document_id, "error": str(exc)},
+                )
                 extraction_result = None
 
         if extraction_result is None:
             pdf_bytes = storage_client.download_blob(container, blob_name)
+            docintel_start = time.perf_counter()
             extraction_result = docintel.analyze_document(pdf_bytes, model=model)
+            extraction_result["metadata"]["docintel_ms"] = int(
+                (time.perf_counter() - docintel_start) * 1000
+            )
+            extraction_result["metadata"]["docintel_source"] = "bytes"
 
         # Update document metadata
         document.page_count = extraction_result["metadata"]["page_count"]
@@ -180,13 +205,15 @@ def get_extraction_result(
         container = blob_uri_parts[1]
         blob_name = blob_uri_parts[2]
 
+        settings = get_settings()
         cache_key = artefact.blob_uri
-        if cache_key in _EXTRACTION_CACHE:
+        if settings.enable_extraction_cache and cache_key in _EXTRACTION_CACHE:
             return _EXTRACTION_CACHE[cache_key]
 
         artefact_bytes = storage_client.download_blob(container, blob_name)
         result = jsonlib.loads(artefact_bytes.decode("utf-8"))
-        _EXTRACTION_CACHE[cache_key] = result
+        if settings.enable_extraction_cache:
+            _EXTRACTION_CACHE[cache_key] = result
         return result
 
     finally:
@@ -231,7 +258,8 @@ def extract_from_pdf_bytes(
     # Check if document was already extracted (caching to avoid redundant API calls)
     document_id = document_meta.get("document_id")
     existing_extraction = None
-    if document_id and db:
+    settings = get_settings()
+    if settings.enable_extraction_cache and document_id and db:
         # Check for existing extraction artefact
         session = db.get_session()
         try:
@@ -255,10 +283,11 @@ def extract_from_pdf_bytes(
                         blob_name = blob_uri_parts[2]
                         artefact_bytes = storage_client.download_blob(container, blob_name)
                         existing_extraction = jsonlib.loads(artefact_bytes.decode("utf-8"))
-                except Exception as e:
-                    # If caching fails (e.g., blob not accessible), fall back to fresh extraction
-                    # This ensures pipeline doesn't break if blob access fails
-                    pass
+                except Exception as exc:
+                    LOGGER.warning(
+                        "extraction_cache_read_failed",
+                        extra={"document_id": document_id, "error": str(exc)},
+                    )
         finally:
             session.close()
     

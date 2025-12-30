@@ -3,6 +3,10 @@ Azure Document Intelligence wrapper for document analysis.
 """
 
 from typing import Dict, List, Any, Optional
+import logging
+import time
+
+from azure.core.exceptions import AzureError
 
 from azure.core.exceptions import AzureError
 
@@ -28,6 +32,33 @@ class DocumentIntelligence:
             endpoint=endpoint,
             credential=AzureKeyCredential(api_key)
         )
+        self._settings = settings
+        self._logger = logging.getLogger(__name__)
+
+    def _with_retry(self, operation_name: str, func, *args, **kwargs):
+        max_attempts = max(1, self._settings.azure_retry_max_attempts)
+        base_delay = max(0.1, self._settings.azure_retry_base_delay_s)
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return func(*args, **kwargs)
+            except AzureError as exc:
+                last_error = exc
+                if attempt == max_attempts:
+                    break
+                delay = base_delay * (2 ** (attempt - 1))
+                self._logger.warning(
+                    "docintel_retry",
+                    extra={
+                        "operation": operation_name,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "delay_s": delay,
+                        "error": str(exc),
+                    },
+                )
+                time.sleep(delay)
+        raise last_error
 
     def analyze_document(
         self,
@@ -54,13 +85,15 @@ class DocumentIntelligence:
             # body is a required positional argument, content_type goes in headers
             from io import BytesIO
             
-            poller = self.client.begin_analyze_document(
+            poller = self._with_retry(
+                "begin_analyze_document_bytes",
+                self.client.begin_analyze_document,
                 model_id=model,
                 body=BytesIO(pdf_bytes),
                 content_type="application/pdf",
-                pages=pages
+                pages=pages,
             )
-            result = poller.result()
+            result = self._with_retry("poll_analyze_document_bytes", poller.result)
             return self._normalize_result(result, model)
 
         except AzureError as e:
@@ -86,12 +119,14 @@ class DocumentIntelligence:
         try:
             from azure.ai.documentintelligence import AnalyzeDocumentRequest
 
-            poller = self.client.begin_analyze_document(
+            poller = self._with_retry(
+                "begin_analyze_document_url",
+                self.client.begin_analyze_document,
                 model_id=model,
                 analyze_request=AnalyzeDocumentRequest(url_source=document_url),
-                pages=pages
+                pages=pages,
             )
-            result = poller.result()
+            result = self._with_retry("poll_analyze_document_url", poller.result)
             return self._normalize_result(result, model)
         except AzureError as e:
             raise RuntimeError(f"Document Intelligence analysis failed: {str(e)}") from e
