@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 
-from planproof.db import Database, Document, ValidationResult, ValidationStatus
+from planproof.db import Database, Document, ValidationResult, ValidationStatus, ValidationCheck
 from planproof.pipeline.extract import get_extraction_result
 
 
@@ -315,7 +315,8 @@ def load_rule_catalog(path: str | Path = "artefacts/rule_catalog.json") -> List[
                 evidence=evidence,
                 severity=r.get("severity", "error"),
                 applies_to=r.get("applies_to", []),
-                tags=r.get("tags", [])
+                tags=r.get("tags", []),
+                required_fields_any=r.get("required_fields_any", False)  # Support OR logic
             )
         )
     return rules
@@ -325,27 +326,68 @@ def validate_extraction(
     extraction: Dict[str, Any],
     rules: List[Rule],
     *,
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
+    db: Optional[Database] = None,
+    write_to_tables: bool = True
 ) -> Dict[str, Any]:
     """
-    Deterministic MVP:
+    Deterministic validation:
     - expects extraction["fields"] dict (even if sparse) + extraction["evidence_index"]
     - checks required_fields presence/non-empty
     - emits findings and whether LLM gate is needed
+    
+    **Hybrid Storage Strategy:**
+    - Returns dict format (for JSON artefact storage in blob)
+    - Optionally writes to relational tables (ValidationCheck)
+    - Both storage methods are maintained going forward
+    
+    Args:
+        extraction: Extraction result dictionary
+        rules: List of validation rules
+        context: Optional context dict (document_id, submission_id, etc.)
+        db: Optional Database instance for writing to relational tables
+        write_to_tables: If True, write ValidationCheck records to database
+                        Note: JSON artefact is always created separately in main pipeline
     """
     context = context or {}
     fields: Dict[str, Any] = extraction.get("fields", {}) or {}
     evidence_index: Dict[str, Any] = extraction.get("evidence_index", {}) or {}
+    
+    # Get document type for doc-type-aware validation
+    document_type = fields.get("document_type", "unknown")
 
     findings: List[Dict[str, Any]] = []
     needs_llm = False
+    
+    # Get IDs from context for writing to tables
+    document_id = context.get("document_id")
+    submission_id = context.get("submission_id")
 
     for rule in rules:
+        # Skip rule if it doesn't apply to this document type
+        if rule.applies_to and len(rule.applies_to) > 0:
+            if document_type not in rule.applies_to:
+                # Rule doesn't apply to this document type - skip it
+                continue
         missing = []
+        found_any = False
+        
+        # Check required fields
         for f in rule.required_fields:
             v = fields.get(f)
             if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, list) and len(v) == 0):
                 missing.append(f)
+            else:
+                found_any = True  # At least one field is present
+        
+        # For OR logic (required_fields_any=True): pass if ANY field is present
+        # For AND logic (required_fields_any=False): fail if ANY field is missing
+        if rule.required_fields_any:
+            # OR logic: if any field is found, rule passes
+            if found_any:
+                missing = []  # Clear missing - rule passes
+            # else: missing contains all fields (rule fails)
+        # else: AND logic - missing contains fields that are missing (rule fails if any missing)
 
         if missing:
             status = "needs_review"
@@ -353,6 +395,7 @@ def validate_extraction(
                 needs_llm = True
             # Find evidence snippets for missing fields (page numbers + snippets)
             evidence_snippets = []
+            evidence_ids = []
             for ev_key, ev_data in evidence_index.items():
                 # Handle both field-specific evidence (list) and general text blocks (dict)
                 if isinstance(ev_data, list):
@@ -377,7 +420,7 @@ def validate_extraction(
                             "snippet": snippet
                         })
             
-            findings.append({
+            finding = {
                 "rule_id": rule.rule_id,
                 "severity": rule.severity,
                 "status": status,
@@ -390,9 +433,49 @@ def validate_extraction(
                     "available_evidence_keys": list(evidence_index.keys()),
                     "evidence_snippets": evidence_snippets[:5]  # Top 5 snippets with page numbers
                 },
-            })
+            }
+            findings.append(finding)
+            
+            # Write to ValidationCheck table if enabled
+            if write_to_tables and db:
+                try:
+                    session = db.get_session()
+                    try:
+                        from planproof.db import Evidence
+                        # Get evidence IDs for this rule
+                        for ev_key in evidence_index.keys():
+                            evidence = session.query(Evidence).filter(
+                                Evidence.document_id == document_id,
+                                Evidence.evidence_key == ev_key
+                            ).first()
+                            if evidence:
+                                evidence_ids.append(evidence.id)
+                        
+                        # Map status to ValidationStatus enum
+                        if status == "pass":
+                            check_status = ValidationStatus.PASS
+                        elif status == "needs_review":
+                            check_status = ValidationStatus.NEEDS_REVIEW
+                        else:
+                            check_status = ValidationStatus.FAIL
+                        
+                        validation_check = ValidationCheck(
+                            submission_id=submission_id,
+                            document_id=document_id,
+                            rule_id_string=rule.rule_id,
+                            status=check_status,
+                            explanation=finding["message"],
+                            evidence_ids=evidence_ids if evidence_ids else None
+                        )
+                        session.add(validation_check)
+                        session.commit()
+                    finally:
+                        session.close()
+                except Exception as e:
+                    # ValidationCheck might already exist or error, continue
+                    pass
         else:
-            findings.append({
+            finding = {
                 "rule_id": rule.rule_id,
                 "severity": rule.severity,
                 "status": "pass",
@@ -400,7 +483,28 @@ def validate_extraction(
                 "required_fields": rule.required_fields,
                 "missing_fields": [],
                 "evidence": {"available_evidence_keys": list(evidence_index.keys())},
-            })
+            }
+            findings.append(finding)
+            
+            # Write to ValidationCheck table if enabled
+            if write_to_tables and db:
+                try:
+                    session = db.get_session()
+                    try:
+                        validation_check = ValidationCheck(
+                            submission_id=submission_id,
+                            document_id=document_id,
+                            rule_id_string=rule.rule_id,
+                            status=ValidationStatus.PASS,
+                            explanation="All required fields present."
+                        )
+                        session.add(validation_check)
+                        session.commit()
+                    finally:
+                        session.close()
+                except Exception as e:
+                    # ValidationCheck might already exist or error, continue
+                    pass
 
     summary = {
         "rule_count": len(rules),

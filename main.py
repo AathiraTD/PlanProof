@@ -1,5 +1,12 @@
 """
 PlanProof - Main entry point for the planning validation system.
+
+This module provides a CLI interface for processing planning application documents.
+It orchestrates the complete pipeline: ingestion → extraction → validation → LLM resolution.
+
+Usage:
+    python main.py single-pdf --pdf "document.pdf" --application-ref "APP/2024/001"
+    python main.py batch-pdf --folder "documents/" --application-ref "APP/2024/001"
 """
 
 from __future__ import annotations
@@ -23,7 +30,22 @@ from planproof.pipeline.llm_gate import should_trigger_llm, resolve_with_llm_new
 
 
 def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str, Any]:
-    """Run end-to-end pipeline: ingest → extract → validate → (optional) llm."""
+    """
+    Run end-to-end pipeline for a single PDF document.
+    
+    Pipeline stages:
+    1. Ingest: Upload PDF to blob storage and create database records
+    2. Extract: Use Document Intelligence to extract text and layout
+    3. Validate: Apply rule-based validation to extracted fields
+    4. LLM Gate: Conditionally resolve missing fields using Azure OpenAI
+    
+    Args:
+        pdf_path: Path to the PDF file to process
+        application_ref: Application reference (auto-generated if not provided)
+        
+    Returns:
+        Dictionary containing run_id, document_id, blob URLs, and validation summary
+    """
     pdf_path = str(Path(pdf_path).resolve())
     
     if not Path(pdf_path).exists():
@@ -46,10 +68,12 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
     db.link_document_to_run(run["id"], ingested["document_id"])
 
     # 2) Extract
+    # Hybrid storage: Write to both JSON artefact (blob) and relational tables (DB)
     pdf_bytes = Path(pdf_path).read_bytes()
-    extraction = extract_from_pdf_bytes(pdf_bytes, ingested, docintel=docintel)
+    extraction = extract_from_pdf_bytes(pdf_bytes, ingested, docintel=docintel, db=db, write_to_tables=True)
     
-    # Save extraction artefact to blob (with unique path for idempotency)
+    # Save extraction artefact to blob (complete JSON for audit trail)
+    # Note: Relational tables (Page, Evidence, ExtractedField) already written above
     extraction_blob = f"runs/{run['id']}/extraction_{run['id']}.json"
     extraction_url = storage_client.write_json_blob("artefacts", extraction_blob, extraction, overwrite=True)
 
@@ -65,8 +89,17 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
         rules = load_rule_catalog("artefacts/rule_catalog.json")
     except (FileNotFoundError, ValueError) as e:
         raise RuntimeError(f"Rule catalog error: {e}") from e
-    validation = validate_extraction(extraction, rules, context={"run_id": run["id"]})
+    # Hybrid storage: Write to both JSON artefact (blob) and relational tables (DB)
+    validation = validate_extraction(
+        extraction, 
+        rules, 
+        context={"run_id": run["id"], "document_id": ingested["document_id"], "submission_id": ingested.get("submission_id")},
+        db=db,
+        write_to_tables=True
+    )
 
+    # Save validation artefact to blob (complete JSON for audit trail)
+    # Note: Relational tables (ValidationCheck) already written above
     validation_blob = f"runs/{run['id']}/validation_{run['id']}.json"
     validation_url = storage_client.write_json_blob("artefacts", validation_blob, validation, overwrite=True)
 
@@ -78,13 +111,24 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
     )
 
     # 4) Gated LLM resolve (only if needed)
-    # Check resolved fields from run metadata
-    run_metadata = run.get("metadata", {}) or {}
-    resolved_fields = run_metadata.get("resolved_fields", {})
+    # Get submission_id from ingested document
+    submission_id = ingested.get("submission_id")
+    
+    # Check resolved fields from submission metadata and application-level cache
+    resolved_fields = {}
+    if submission_id:
+        resolved_fields = db.get_resolved_fields_for_submission(submission_id)
+    
+    # Load application-level resolved fields cache (fallback/aggregate)
+    app_resolved = db.get_resolved_fields_for_application(app_ref)
+    resolved_fields = {**app_resolved, **resolved_fields}  # Merge, current submission takes precedence
+    
+    # Reset LLM call counter for this run
+    aoai_client.reset_call_count()
     
     llm_notes = None
     llm_art = None
-    if should_trigger_llm(validation, extraction, resolved_fields=resolved_fields):
+    if should_trigger_llm(validation, extraction, resolved_fields=resolved_fields, application_ref=app_ref, submission_id=submission_id, db=db):
         print(f"LLM gate triggered for run {run['id']}")
         llm_notes = resolve_with_llm_new(extraction, validation, aoai_client=aoai_client)
         if llm_notes.get("gate_reason"):
@@ -92,10 +136,13 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
             print(f"  Missing fields: {reason.get('missing_fields', [])}")
             print(f"  Affected rules: {reason.get('affected_rule_ids', [])}")
         
-        # Store resolved fields in run metadata
+        # Store resolved fields in submission metadata (preferred) and run metadata (backward compat)
         if llm_notes.get("response", {}).get("filled_fields"):
             filled = llm_notes["response"]["filled_fields"]
             resolved_fields.update(filled)
+            if submission_id:
+                db.update_submission_metadata(submission_id, {"resolved_fields": resolved_fields})
+            # Also update run metadata for backward compatibility
             db.update_run(run["id"], metadata={"resolved_fields": resolved_fields})
         
         llm_blob = f"runs/{run['id']}/llm_notes_{run['id']}.json"
@@ -106,6 +153,17 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
             blob_uri=llm_url,
             metadata={"run_id": run["id"], "blob_path": llm_blob}
         )
+    
+    # Get total LLM calls for this run
+    llm_calls_per_run = aoai_client.get_call_count()
+    
+    # Update submission metadata with LLM call count (preferred) and run metadata (backward compat)
+    if submission_id:
+        db.update_submission_metadata(submission_id, {"llm_calls_per_submission": llm_calls_per_run})
+    db.update_run(run["id"], metadata={"llm_calls_per_run": llm_calls_per_run})
+    
+    # Log headline metric
+    print(f"📊 LLM Calls Per Run: {llm_calls_per_run} (headline metric)")
 
     return {
         "run_id": run["id"],
@@ -122,11 +180,22 @@ def single_pdf(pdf_path: str, application_ref: Optional[str] = None) -> Dict[str
         },
         "summary": validation.get("summary", {}),
         "llm_triggered": llm_notes is not None,
+        "llm_calls_per_run": llm_calls_per_run,
     }
 
 
 def main():
-    """Main entry point."""
+    """
+    Main CLI entry point.
+    
+    Supports the following commands:
+    - single-pdf: Process a single PDF document
+    - batch-pdf: Process all PDFs in a folder
+    - ingest: Ingest a PDF (legacy)
+    - extract: Extract document (legacy)
+    - validate: Validate document (legacy)
+    - resolve: Resolve with LLM (legacy)
+    """
     ap = argparse.ArgumentParser(description="PlanProof - Planning Validation System MVP")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -190,6 +259,9 @@ def main():
                 }
             )
             print(f"Created run {run['id']} for batch processing")
+            
+            # Reset LLM call counter for this run
+            aoai_client.reset_call_count()
             
             # Ingest all PDFs in folder
             print(f"Ingesting PDFs from {folder_path}...")
@@ -287,14 +359,24 @@ def main():
                     }
                     
                     # Validate
-                    validation = validate_extraction(extraction_structured, rules, context={"document_id": doc_id})
+                    validation = validate_extraction(
+                        extraction_structured, 
+                        rules, 
+                        context={"document_id": doc_id, "submission_id": ingested.get("submission_id")},
+                        db=db,
+                        write_to_tables=True
+                    )
                     
-                    # LLM gate if needed (check resolved fields from run)
+                    # LLM gate if needed (check resolved fields from submission and application-level cache)
                     run_metadata = run.get("metadata", {}) or {}
                     resolved_fields = run_metadata.get("resolved_fields", {})
                     
+                    # Load application-level resolved fields cache
+                    app_resolved = db.get_resolved_fields_for_application(application_ref)
+                    resolved_fields = {**app_resolved, **resolved_fields}  # Merge, current run takes precedence
+                    
                     llm_notes = None
-                    if should_trigger_llm(validation, extraction_structured, resolved_fields=resolved_fields):
+                    if should_trigger_llm(validation, extraction_structured, resolved_fields=resolved_fields, application_ref=application_ref, db=db):
                         print(f"  LLM gate triggered for document {doc_id}")
                         llm_notes = resolve_with_llm_new(extraction_structured, validation, aoai_client=aoai_client)
                         if llm_notes.get("gate_reason"):
@@ -316,7 +398,8 @@ def main():
                         "document_id": doc_id,
                         "filename": ingested["filename"],
                         "validation_summary": validation.get("summary", {}),
-                        "llm_triggered": llm_notes is not None
+                        "llm_triggered": llm_notes is not None,
+                        "llm_call_count": llm_notes.get("llm_call_count", 0) if llm_notes else 0
                     })
                     successes += 1
                     print(f"  OK: Completed document {doc_id}")
@@ -339,7 +422,16 @@ def main():
                         "error": error_msg
                     })
             
-            # Update run with final status
+            # Get total LLM calls for this run
+            llm_calls_per_run = aoai_client.get_call_count()
+            
+            # Update submission metadata with LLM call count (if we have a submission)
+            # For batch processing, all documents should be in the same submission (V0)
+            if ingested_results and ingested_results[0].get("submission_id"):
+                submission_id = ingested_results[0]["submission_id"]
+                db.update_submission_metadata(submission_id, {"llm_calls_per_submission": llm_calls_per_run})
+            
+            # Update run with final status and LLM call count
             final_status = "completed" if failures == 0 else "completed_with_errors"
             db.update_run(
                 run["id"],
@@ -350,12 +442,13 @@ def main():
                         "successes": successes,
                         "failures": failures
                     },
-                    "errors": errors
+                    "errors": errors,
+                    "llm_calls_per_run": llm_calls_per_run
                 }
             )
             
-            # Count LLM calls
-            llm_calls = sum(1 for r in all_results if r.get("llm_triggered", False))
+            # Count documents that triggered LLM
+            llm_triggered_count = sum(1 for r in all_results if r.get("llm_triggered", False))
             
             summary = {
                 "run_id": run["id"],
@@ -363,10 +456,13 @@ def main():
                 "total_documents": len(ingested_results),
                 "successes": successes,
                 "failures": failures,
-                "llm_calls": llm_calls,
-                "llm_calls_per_run": llm_calls,
+                "llm_triggered_documents": llm_triggered_count,
+                "llm_calls_per_run": llm_calls_per_run,
                 "results": all_results
             }
+            
+            # Log headline metric
+            print(f"\n📊 LLM Calls Per Run: {llm_calls_per_run} (headline metric)")
             
             print(jsonlib.dumps(summary, indent=2))
             if args.out:

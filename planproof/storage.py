@@ -208,3 +208,20 @@ class StorageClient:
         
         return self.get_blob_uri(container, blob_path)
 
+    def read_json_blob(self, container: str, blob_path: str) -> dict:
+        """
+        Read a JSON blob and parse it as a dictionary.
+
+        Args:
+            container: Container name (e.g., "artefacts")
+            blob_path: Blob path/name
+
+        Returns:
+            Parsed JSON dictionary
+        """
+        import json as json_module
+        
+        blob_path = blob_path.lstrip("/")
+        blob_bytes = self.download_blob(container, blob_path)
+        return json_module.loads(blob_bytes.decode("utf-8"))
+

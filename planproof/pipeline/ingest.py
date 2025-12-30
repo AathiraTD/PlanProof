@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from planproof.storage import StorageClient
-from planproof.db import Database, Application, Document
+from planproof.db import Database, Application, Document, Submission
 
 
 def ingest_pdf(
@@ -67,17 +67,29 @@ def ingest_pdf(
             application_date=application_date
         )
 
+    # Get or create V0 submission for this application
+    submission = db.get_submission_by_version(application.id, "V0")
+    if submission is None:
+        submission = db.create_submission(
+            planning_case_id=application.id,
+            submission_version="V0",
+            status="pending"
+        )
+
     # Check if document with same hash already exists
     session = db.get_session()
     try:
         existing_doc = session.query(Document).filter(Document.content_hash == content_hash).first()
         if existing_doc:
-            # Link existing document to this application if not already linked
+            # Link existing document to this application and submission if not already linked
             if existing_doc.application_id != application.id:
                 existing_doc.application_id = application.id
-                session.commit()
+            if existing_doc.submission_id != submission.id:
+                existing_doc.submission_id = submission.id
+            session.commit()
             return {
                 "application_id": application.id,
+                "submission_id": submission.id,
                 "document_id": existing_doc.id,
                 "blob_uri": existing_doc.blob_uri,
                 "filename": existing_doc.filename,
@@ -89,9 +101,10 @@ def ingest_pdf(
     # Upload PDF to blob storage
     blob_uri = storage_client.upload_pdf(pdf_path, blob_name=blob_name)
 
-    # Create document record with content hash
+    # Create document record with content hash, linked to both application and submission
     document = db.create_document(
         application_id=application.id,
+        submission_id=submission.id,
         blob_uri=blob_uri,
         filename=pdf_path_obj.name,
         content_hash=content_hash
@@ -99,6 +112,7 @@ def ingest_pdf(
 
     return {
         "application_id": application.id,
+        "submission_id": submission.id,
         "document_id": document.id,
         "blob_uri": blob_uri,
         "filename": pdf_path_obj.name

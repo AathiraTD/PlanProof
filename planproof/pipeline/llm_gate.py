@@ -221,8 +221,9 @@ def _get_validation_rules_for_field(field_name: str) -> str:
 
 # Field ownership: which doc types can extract which fields
 DOC_FIELD_OWNERSHIP = {
-    "application_form": {"application_ref", "site_address", "proposed_use", "applicant_name", "agent_name"},
-    "site_plan": {"site_address", "proposed_use"},
+    "application_form": {"application_ref", "site_address", "postcode", "proposed_use", "applicant_name", "agent_name", "applicant_phone", "applicant_email"},
+    "site_notice": {"site_address", "postcode", "proposed_use"},  # Supporting evidence, not primary source
+    "site_plan": {"site_address", "postcode"},  # Optional - may not always have address
     "drawing": {"proposed_use"},  # Drawings might have use descriptions
     "design_statement": {"proposed_use", "site_address"},
     "unknown": {"site_address", "proposed_use"},  # Fallback
@@ -232,7 +233,10 @@ DOC_FIELD_OWNERSHIP = {
 def should_trigger_llm(
     validation: Dict[str, Any],
     extraction: Dict[str, Any],
-    resolved_fields: Optional[Dict[str, Any]] = None
+    resolved_fields: Optional[Dict[str, Any]] = None,
+    application_ref: Optional[str] = None,
+    submission_id: Optional[int] = None,
+    db: Optional[Database] = None
 ) -> bool:
     """
     Check if LLM resolution should be triggered based on validation results.
@@ -241,9 +245,27 @@ def should_trigger_llm(
     - Missing field is extractable from THIS doc type (field ownership)
     - Doc has enough text coverage
     - At least one rule is blocking (severity error) - warnings don't trigger
-    - Field hasn't already been resolved earlier in the run/application
+    - Field hasn't already been resolved earlier in the submission/application (application-level cache)
+    
+    Args:
+        validation: Validation result dictionary
+        extraction: Extraction result dictionary
+        resolved_fields: Resolved fields from current submission (optional)
+        application_ref: Application reference for application-level cache lookup (optional)
+        submission_id: Submission ID for submission-level cache lookup (optional, preferred)
+        db: Database instance for cache lookup (optional)
     """
     resolved_fields = resolved_fields or {}
+    
+    # If submission_id is provided, check submission-level cache (preferred)
+    if submission_id and db:
+        submission_resolved = db.get_resolved_fields_for_submission(submission_id)
+        resolved_fields = {**submission_resolved, **resolved_fields}  # Merge, current submission takes precedence
+    
+    # If application_ref is provided, check application-level cache (fallback)
+    elif application_ref and db:
+        app_resolved = db.get_resolved_fields_for_application(application_ref)
+        resolved_fields = {**app_resolved, **resolved_fields}  # Merge, current submission takes precedence
     
     # Check if needs_llm flag is set
     if not validation.get("summary", {}).get("needs_llm"):
@@ -324,10 +346,13 @@ def resolve_with_llm_new(extraction: Dict[str, Any], validation: Dict[str, Any],
         aoai_client: Optional AzureOpenAIClient instance
         
     Returns:
-        Dictionary with triggered flag, request, response, and gate logging info
+        Dictionary with triggered flag, request, response, gate logging info, and llm_call_count
     """
     if aoai_client is None:
         aoai_client = AzureOpenAIClient()
+    
+    # Get call count before the LLM call
+    call_count_before = aoai_client.get_call_count()
     
     # Collect missing fields and affected rule IDs for logging
     missing_fields: List[str] = []
@@ -347,6 +372,10 @@ def resolve_with_llm_new(extraction: Dict[str, Any], validation: Dict[str, Any],
     prompt_obj = build_llm_prompt(extraction, validation)
     resp = aoai_client.chat_json(prompt_obj)  # returns parsed JSON dict
     
+    # Get call count after the LLM call
+    call_count_after = aoai_client.get_call_count()
+    llm_calls_made = call_count_after - call_count_before
+    
     return {
         "triggered": True,
         "gate_reason": {
@@ -356,5 +385,6 @@ def resolve_with_llm_new(extraction: Dict[str, Any], validation: Dict[str, Any],
         },
         "request": prompt_obj,
         "response": resp,
+        "llm_call_count": llm_calls_made,
     }
 

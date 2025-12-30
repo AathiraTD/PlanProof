@@ -15,8 +15,8 @@
 4. Set up `.env` file with your Azure credentials
 5. Run database migrations:
    ```bash
-   python scripts/enable_postgis.py
-   python scripts/add_content_hash_column.py
+   python scripts/db/enable_postgis.py
+   python scripts/db/add_content_hash_column.py
    ```
 
 ## Code Style

@@ -1,5 +1,12 @@
 """
-Configuration management - loads .env, validates required variables, centralizes settings.
+Configuration management module.
+
+Loads settings from .env file, validates required variables, and centralizes
+configuration access across the application. Uses Pydantic for type-safe
+configuration with automatic environment variable parsing.
+
+All configuration values are loaded from environment variables (or .env file).
+Required variables must be set or the application will fail to start.
 """
 
 import os
@@ -9,7 +16,12 @@ from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """
+    Application settings loaded from environment variables.
+    
+    All settings use Field aliases to map to uppercase environment variable names
+    (e.g., DATABASE_URL). The .env file should contain these uppercase variable names.
+    """
 
     # Azure Storage
     azure_storage_connection_string: str = Field(..., alias="AZURE_STORAGE_CONNECTION_STRING")

@@ -59,14 +59,18 @@ htmlcov/
 *.key
 
 # Test results and temporary files
-batch_*.json
-test_*.json
-*_results.json
-*_test.json
+data/batch_*.json
+data/test_*.json
+data/*_results.json
+data/*_test.json
+data/extracted_layout_*.json
 
 # Artefacts (keep rule_catalog.json but ignore runtime artefacts)
 artefacts/runs/
 artefacts/extracted_layout_*.json
+
+# Runtime outputs
+runs/
 
 # Database migrations (if using Alembic)
 alembic/versions/*.pyc

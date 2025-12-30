@@ -30,6 +30,7 @@ class Rule:
     severity: str = "error"  # error|warning
     applies_to: List[str] = None  # e.g. ["new_build", "amendment"]
     tags: List[str] = None
+    required_fields_any: bool = False  # If True, any field satisfies (OR logic), else all required (AND logic)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

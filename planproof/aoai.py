@@ -32,6 +32,7 @@ class AzureOpenAIClient:
             api_version=api_version
         )
         self.deployment = deployment
+        self._call_count = 0  # Track LLM calls for metrics
 
     def chat_completion(
         self,
@@ -52,6 +53,7 @@ class AzureOpenAIClient:
         Returns:
             ChatCompletion response
         """
+        self._call_count += 1
         return self.client.chat.completions.create(
             model=self.deployment,
             messages=messages,
@@ -59,6 +61,14 @@ class AzureOpenAIClient:
             max_tokens=max_tokens,
             **kwargs
         )
+    
+    def get_call_count(self) -> int:
+        """Get the current LLM call count for this client instance."""
+        return self._call_count
+    
+    def reset_call_count(self):
+        """Reset the LLM call counter (useful for per-run tracking)."""
+        self._call_count = 0
 
     def resolve_field_conflict(
         self,

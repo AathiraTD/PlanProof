@@ -22,7 +22,7 @@ $env:PYTHONPATH="$PWD"    # Windows PowerShell
 
 **Solution**: Ensure content hash column exists:
 ```bash
-python scripts/add_content_hash_column.py
+python scripts/db/add_content_hash_column.py
 ```
 
 ### LLM triggering too often
@@ -44,7 +44,7 @@ python scripts/add_content_hash_column.py
 **Check**:
 1. `DATABASE_URL` format: `postgresql+psycopg://user:pass@host:5432/dbname`
 2. Database is accessible from your network
-3. PostGIS extension enabled: `python scripts/enable_postgis.py`
+3. PostGIS extension enabled: `python scripts/db/enable_postgis.py`
 
 ### Blob storage errors
 
@@ -58,26 +58,26 @@ python scripts/add_content_hash_column.py
 ### Check extraction results
 
 ```bash
-python scripts/show_extraction.py <document_id>
+python scripts/utilities/show_extraction.py <document_id>
 ```
 
 ### Check validation results
 
 ```bash
-python scripts/check_validation.py <run_id>
+python scripts/utilities/check_validation.py <run_id>
 ```
 
 ### Check database state
 
 ```bash
-python scripts/check_db.py
-python scripts/list_runs.py
+python scripts/utilities/check_db.py
+python scripts/utilities/list_runs.py
 ```
 
 ### Check blob storage
 
 ```bash
-python scripts/check_blobs.py
+python scripts/utilities/check_blobs.py
 ```
 
 ## Performance Issues

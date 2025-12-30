@@ -1,0 +1,4 @@
+"""
+UI pages module.
+"""
+

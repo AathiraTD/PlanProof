@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "source": "validation_requirements.md",
-  "rule_count": 3,
+  "rule_count": 4,
   "rules": [
     {
       "rule_id": "R1",
@@ -12,8 +12,7 @@
       ],
       "evidence": {
         "source_types": [
-          "application_form",
-          "site_plan"
+          "application_form"
         ],
         "keywords": [
           "address",
@@ -23,7 +22,31 @@
         "min_confidence": 0.6
       },
       "severity": "error",
-      "applies_to": [],
+      "applies_to": ["application_form"],
+      "tags": []
+    },
+    {
+      "rule_id": "R1-SITE-NOTICE",
+      "title": "Site Notice Supporting Evidence",
+      "description": "Site notices should provide site_address OR postcode OR demolition text as supporting evidence.",
+      "required_fields": [
+        "site_address",
+        "postcode"
+      ],
+      "required_fields_any": true,
+      "evidence": {
+        "source_types": [
+          "site_notice"
+        ],
+        "keywords": [
+          "address",
+          "postcode",
+          "demolition"
+        ],
+        "min_confidence": 0.6
+      },
+      "severity": "warning",
+      "applies_to": ["site_notice"],
       "tags": []
     },
     {
@@ -46,7 +69,7 @@
         "min_confidence": 0.6
       },
       "severity": "error",
-      "applies_to": [],
+      "applies_to": ["application_form", "design_statement"],
       "tags": []
     },
     {
@@ -63,8 +86,8 @@
         "keywords": [],
         "min_confidence": 0.6
       },
-      "severity": "warning",
-      "applies_to": [],
+      "severity": "error",
+      "applies_to": ["application_form"],
       "tags": []
     }
   ]

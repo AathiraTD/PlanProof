@@ -29,7 +29,7 @@ class ValidationStatus(str, Enum):
 
 
 class Application(Base):
-    """Planning application record."""
+    """Planning application record (PlanningCase in requirements)."""
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -40,7 +40,30 @@ class Application(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    submissions = relationship("Submission", back_populates="planning_case", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="application", cascade="all, delete-orphan")
+
+
+class Submission(Base):
+    """Submission version (V0, V1+) for a PlanningCase."""
+    __tablename__ = "submissions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    planning_case_id = Column(Integer, ForeignKey("applications.id"), nullable=False, index=True)
+    submission_version = Column(String(10), nullable=False, index=True)  # "V0", "V1", "V2", etc.
+    parent_submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=True, index=True)  # For modifications
+    status = Column(String(20), nullable=False, default="pending")  # pending, processing, completed, failed
+    submission_metadata = Column(JSON, nullable=True)  # resolved_fields, llm_calls_per_submission, etc.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    planning_case = relationship("Application", back_populates="submissions")
+    parent_submission = relationship("Submission", remote_side=[id], backref="child_submissions")
+    documents = relationship("Document", back_populates="submission", cascade="all, delete-orphan")
+    extracted_fields = relationship("ExtractedField", back_populates="submission", cascade="all, delete-orphan")
+    change_sets = relationship("ChangeSet", foreign_keys="ChangeSet.submission_id", back_populates="submission", cascade="all, delete-orphan")
+    validation_checks = relationship("ValidationCheck", back_populates="submission", cascade="all, delete-orphan")
 
 
 class Document(Base):
@@ -48,7 +71,8 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False, index=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=True, index=True)  # NEW: Link to submission
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=True, index=True)  # Keep for backward compat
     blob_uri = Column(String(500), nullable=False, unique=True, index=True)
     filename = Column(String(255), nullable=False)
     content_hash = Column(String(64), nullable=True, unique=True, index=True)  # SHA256 hash for deduplication
@@ -56,11 +80,180 @@ class Document(Base):
     processed_at = Column(DateTime, nullable=True)
     page_count = Column(Integer, nullable=True)
     docintel_model = Column(String(50), nullable=True)  # e.g., "prebuilt-layout"
+    document_type = Column(String(50), nullable=True)  # e.g., "application_form", "site_plan"
 
     # Relationships
+    submission = relationship("Submission", back_populates="documents")
     application = relationship("Application", back_populates="documents")
+    pages = relationship("Page", back_populates="document", cascade="all, delete-orphan")
+    evidence = relationship("Evidence", back_populates="document", cascade="all, delete-orphan")
     artefacts = relationship("Artefact", back_populates="document", cascade="all, delete-orphan")
     validation_results = relationship("ValidationResult", back_populates="document", cascade="all, delete-orphan")
+    validation_checks = relationship("ValidationCheck", back_populates="document", cascade="all, delete-orphan")
+
+
+class Page(Base):
+    """Page record for a document."""
+    __tablename__ = "pages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    page_number = Column(Integer, nullable=False)
+    page_metadata = Column(JSON, nullable=True)  # OCR confidence, dimensions, etc.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    document = relationship("Document", back_populates="pages")
+    evidence = relationship("Evidence", back_populates="page", cascade="all, delete-orphan")
+
+
+class Evidence(Base):
+    """Evidence pointer: page + bbox + snippet + confidence."""
+    __tablename__ = "evidence"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    page_id = Column(Integer, ForeignKey("pages.id"), nullable=True, index=True)
+    page_number = Column(Integer, nullable=False)  # Denormalized for quick access
+    evidence_type = Column(String(50), nullable=False)  # "text_block", "table", "field_extraction"
+    evidence_key = Column(String(100), nullable=False, index=True)  # e.g., "text_block_0", "site_address_evidence"
+    bbox = Column(JSON, nullable=True)  # {x, y, width, height} or PostGIS geometry
+    snippet = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)  # Full content if available
+    confidence = Column(Float, nullable=True)  # 0.0 to 1.0
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    document = relationship("Document", back_populates="evidence")
+    page = relationship("Page", back_populates="evidence")
+    extracted_fields = relationship("ExtractedField", back_populates="evidence", cascade="all, delete-orphan")
+
+
+class ExtractedField(Base):
+    """Extracted field with value, unit, confidence, and evidence links."""
+    __tablename__ = "extracted_fields"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=False, index=True)
+    field_name = Column(String(100), nullable=False, index=True)  # e.g., "site_address", "proposed_use"
+    field_value = Column(Text, nullable=True)
+    field_unit = Column(String(50), nullable=True)  # e.g., "m", "sqm", "stories"
+    confidence = Column(Float, nullable=True)  # 0.0 to 1.0
+    extractor = Column(String(50), nullable=True)  # "regex", "heuristic", "llm", etc.
+    evidence_id = Column(Integer, ForeignKey("evidence.id"), nullable=True, index=True)
+    conflict_flag = Column(String(20), nullable=True)  # "none", "detected", "resolved"
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    submission = relationship("Submission", back_populates="extracted_fields")
+    evidence = relationship("Evidence", back_populates="extracted_fields")
+
+
+class GeometryFeature(Base):
+    """Geometry feature (outlines) for spatial validation."""
+    __tablename__ = "geometry_features"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=False, index=True)
+    feature_type = Column(String(50), nullable=False)  # "site_boundary", "proposed_extension", "proposed_balcony"
+    geometry = Column(Geometry("GEOMETRY"), nullable=True)  # PostGIS geometry
+    geometry_json = Column(JSON, nullable=True)  # Fallback JSON representation
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    submission = relationship("Submission")
+    spatial_metrics = relationship("SpatialMetric", back_populates="geometry_feature", cascade="all, delete-orphan")
+
+
+class SpatialMetric(Base):
+    """Spatial metric (key measures) derived from geometry."""
+    __tablename__ = "spatial_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    geometry_feature_id = Column(Integer, ForeignKey("geometry_features.id"), nullable=False, index=True)
+    metric_name = Column(String(100), nullable=False)  # "min_distance_to_boundary", "area", "projection_depth"
+    metric_value = Column(Float, nullable=False)
+    metric_unit = Column(String(50), nullable=False)  # "m", "sqm", etc.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    geometry_feature = relationship("GeometryFeature", back_populates="spatial_metrics")
+
+
+class ChangeSet(Base):
+    """ChangeSet: computed delta between two submissions."""
+    __tablename__ = "change_sets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=False, index=True)  # V1+ submission
+    parent_submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=False, index=True)  # V0 submission
+    significance_score = Column(Float, nullable=True)  # 0.0 to 1.0
+    requires_validation = Column(String(20), nullable=False, default="yes")  # "yes", "no", "partial"
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    submission = relationship("Submission", foreign_keys=[submission_id], back_populates="change_sets")
+    parent_submission = relationship("Submission", foreign_keys=[parent_submission_id])
+    change_items = relationship("ChangeItem", back_populates="change_set", cascade="all, delete-orphan")
+
+
+class ChangeItem(Base):
+    """ChangeItem: individual change within a ChangeSet."""
+    __tablename__ = "change_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    change_set_id = Column(Integer, ForeignKey("change_sets.id"), nullable=False, index=True)
+    change_type = Column(String(50), nullable=False)  # "field_delta", "document_delta", "spatial_metric_delta"
+    item_key = Column(String(100), nullable=False)  # Field name, document filename, metric name
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    significance = Column(String(20), nullable=True)  # "low", "medium", "high"
+    impacted_rule_ids = Column(JSON, nullable=True)  # List of rule IDs that need revalidation
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    change_set = relationship("ChangeSet", back_populates="change_items")
+
+
+class Rule(Base):
+    """Validation rule (can also be in JSON catalog, but DB allows versioning)."""
+    __tablename__ = "rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_id = Column(String(100), unique=True, nullable=False, index=True)  # e.g., "RULE-1"
+    rule_name = Column(String(255), nullable=False)
+    rule_category = Column(String(50), nullable=False)  # "DOCUMENT_REQUIRED", "CONSISTENCY", "MODIFICATION", "SPATIAL"
+    required_fields = Column(JSON, nullable=False)  # List of field names
+    severity = Column(String(20), nullable=False)  # "error", "warning"
+    rule_config = Column(JSON, nullable=True)  # Additional rule configuration
+    is_active = Column(String(10), nullable=False, default="yes")  # "yes", "no"
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    validation_checks = relationship("ValidationCheck", back_populates="rule", cascade="all, delete-orphan")
+
+
+class ValidationCheck(Base):
+    """ValidationCheck: per-rule execution result (separate from ValidationResult)."""
+    __tablename__ = "validation_checks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True, index=True)
+    rule_id = Column(Integer, ForeignKey("rules.id"), nullable=True, index=True)
+    rule_id_string = Column(String(100), nullable=True, index=True)  # Denormalized for quick lookup
+    status = Column(SQLEnum(ValidationStatus), nullable=False, default=ValidationStatus.PENDING)
+    explanation = Column(Text, nullable=True)
+    evidence_ids = Column(JSON, nullable=True)  # List of evidence IDs
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    submission = relationship("Submission", back_populates="validation_checks")
+    document = relationship("Document", back_populates="validation_checks")
+    rule = relationship("Rule", back_populates="validation_checks")
 
 
 class Artefact(Base):
@@ -79,7 +272,7 @@ class Artefact(Base):
 
 
 class ValidationResult(Base):
-    """Validation results for extracted fields."""
+    """Validation results for extracted fields (legacy, kept for backward compatibility)."""
     __tablename__ = "validation_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -128,7 +321,15 @@ class Database:
             self.database_url = self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
         elif self.database_url.startswith("postgres://"):
             self.database_url = self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
-        self.engine = create_engine(self.database_url, echo=False)
+        # Configure connection pool to prevent exhaustion
+        self.engine = create_engine(
+            self.database_url,
+            echo=False,
+            pool_size=5,  # Limit pool size
+            max_overflow=10,  # Allow overflow connections
+            pool_pre_ping=True,  # Verify connections before using
+            pool_recycle=3600  # Recycle connections after 1 hour
+        )
         self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
 
     def create_tables(self):
@@ -139,20 +340,25 @@ class Database:
         """Get a database session."""
         return self.SessionLocal()
 
-    def execute_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def execute_raw(self, query: str, params: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Execute a raw SQL query and return results as dictionaries.
 
         Args:
             query: SQL query string
-            params: Optional query parameters
+            params: Optional query parameters (tuple, dict, or None)
 
         Returns:
             List of result dictionaries
         """
-        with psycopg.connect(self.database_url) as conn:
+        # Get raw database URL (psycopg needs postgresql:// not postgresql+psycopg://)
+        raw_url = self.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        with psycopg.connect(raw_url) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(query, params or {})
+                if params is None:
+                    cur.execute(query)
+                else:
+                    cur.execute(query, params)
                 return cur.fetchall()
 
     def create_application(
@@ -191,13 +397,15 @@ class Database:
         filename: str,
         page_count: Optional[int] = None,
         docintel_model: Optional[str] = None,
-        content_hash: Optional[str] = None
+        content_hash: Optional[str] = None,
+        submission_id: Optional[int] = None
     ) -> Document:
         """Create a new document record."""
         session = self.get_session()
         try:
             doc = Document(
                 application_id=application_id,
+                submission_id=submission_id,
                 blob_uri=blob_uri,
                 filename=filename,
                 page_count=page_count,
@@ -312,6 +520,247 @@ class Database:
                     run.run_metadata = existing
                 run.completed_at = datetime.now(timezone.utc)
                 session.commit()
+        finally:
+            session.close()
+
+    def get_resolved_fields_for_submission(self, submission_id: int) -> Dict[str, Any]:
+        """Get resolved fields cache for a submission."""
+        session = self.get_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if submission and submission.submission_metadata:
+                return submission.submission_metadata.get("resolved_fields", {})
+            return {}
+        finally:
+            session.close()
+    
+    def get_resolved_fields_for_application(self, application_ref: str) -> Dict[str, Any]:
+        """
+        Get all resolved fields from previous submissions for a given application_ref.
+        
+        This implements application-level caching: if a field was resolved in any
+        previous submission for this application, it won't be asked again.
+        
+        Args:
+            application_ref: Application reference string
+            
+        Returns:
+            Dictionary of resolved fields {field_name: value}
+        """
+        session = self.get_session()
+        try:
+            # Get planning case (application)
+            app = session.query(Application).filter(Application.application_ref == application_ref).first()
+            if not app:
+                return {}
+            
+            # Query all submissions for this planning case
+            submissions = session.query(Submission).filter(
+                Submission.planning_case_id == app.id
+            ).order_by(Submission.created_at.desc()).all()
+            
+            resolved_fields = {}
+            for submission in submissions:
+                if submission.submission_metadata:
+                    submission_resolved = submission.submission_metadata.get("resolved_fields", {})
+                    if submission_resolved:
+                        resolved_fields.update(submission_resolved)
+            
+            return resolved_fields
+        finally:
+            session.close()
+
+    def update_submission_metadata(
+        self,
+        submission_id: int,
+        metadata_updates: Dict[str, Any]
+    ):
+        """
+        Update submission metadata by merging with existing metadata.
+        
+        Args:
+            submission_id: Submission ID
+            metadata_updates: Dictionary of metadata fields to update/merge
+        """
+        session = self.get_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if submission:
+                # Merge with existing metadata
+                existing_metadata = submission.submission_metadata or {}
+                existing_metadata.update(metadata_updates)
+                submission.submission_metadata = existing_metadata
+                submission.updated_at = datetime.now(timezone.utc)
+                session.commit()
+        finally:
+            session.close()
+
+    def create_submission(
+        self,
+        planning_case_id: int,
+        submission_version: str = "V0",
+        parent_submission_id: Optional[int] = None,
+        status: str = "pending",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Submission:
+        """Create a new submission record."""
+        session = self.get_session()
+        try:
+            submission = Submission(
+                planning_case_id=planning_case_id,
+                submission_version=submission_version,
+                parent_submission_id=parent_submission_id,
+                status=status,
+                submission_metadata=metadata or {}
+            )
+            session.add(submission)
+            session.commit()
+            session.refresh(submission)
+            return submission
+        finally:
+            session.close()
+
+    def get_submission_by_version(
+        self,
+        planning_case_id: int,
+        submission_version: str
+    ) -> Optional[Submission]:
+        """Get a submission by planning case and version."""
+        session = self.get_session()
+        try:
+            return session.query(Submission).filter(
+                Submission.planning_case_id == planning_case_id,
+                Submission.submission_version == submission_version
+            ).first()
+        finally:
+            session.close()
+
+    def create_page(
+        self,
+        document_id: int,
+        page_number: int,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Page:
+        """Create a new page record."""
+        session = self.get_session()
+        try:
+            page = Page(
+                document_id=document_id,
+                page_number=page_number,
+                page_metadata=metadata or {}
+            )
+            session.add(page)
+            session.commit()
+            session.refresh(page)
+            return page
+        finally:
+            session.close()
+
+    def create_evidence(
+        self,
+        document_id: int,
+        page_number: int,
+        evidence_type: str,
+        evidence_key: str,
+        snippet: Optional[str] = None,
+        content: Optional[str] = None,
+        confidence: Optional[float] = None,
+        bbox: Optional[Dict[str, Any]] = None,
+        page_id: Optional[int] = None
+    ) -> Evidence:
+        """Create a new evidence record."""
+        session = self.get_session()
+        try:
+            evidence = Evidence(
+                document_id=document_id,
+                page_id=page_id,
+                page_number=page_number,
+                evidence_type=evidence_type,
+                evidence_key=evidence_key,
+                snippet=snippet,
+                content=content,
+                confidence=confidence,
+                bbox=bbox
+            )
+            session.add(evidence)
+            session.commit()
+            session.refresh(evidence)
+            return evidence
+        finally:
+            session.close()
+
+    def create_extracted_field(
+        self,
+        submission_id: int,
+        field_name: str,
+        field_value: Optional[str] = None,
+        field_unit: Optional[str] = None,
+        confidence: Optional[float] = None,
+        extractor: Optional[str] = None,
+        evidence_id: Optional[int] = None
+    ) -> ExtractedField:
+        """Create a new extracted field record."""
+        session = self.get_session()
+        try:
+            field = ExtractedField(
+                submission_id=submission_id,
+                field_name=field_name,
+                field_value=field_value,
+                field_unit=field_unit,
+                confidence=confidence,
+                extractor=extractor,
+                evidence_id=evidence_id
+            )
+            session.add(field)
+            session.commit()
+            session.refresh(field)
+            return field
+        finally:
+            session.close()
+
+    def get_extracted_fields_for_submission(
+        self,
+        submission_id: int
+    ) -> Dict[str, Any]:
+        """Get all extracted fields for a submission as a dict (for backward compatibility)."""
+        session = self.get_session()
+        try:
+            fields = session.query(ExtractedField).filter(
+                ExtractedField.submission_id == submission_id
+            ).all()
+            
+            result = {}
+            for field in fields:
+                result[field.field_name] = field.field_value
+            
+            return result
+        finally:
+            session.close()
+
+    def get_evidence_index_for_document(
+        self,
+        document_id: int
+    ) -> Dict[str, Any]:
+        """Get all evidence for a document as a dict (for backward compatibility)."""
+        session = self.get_session()
+        try:
+            evidence_list = session.query(Evidence).filter(
+                Evidence.document_id == document_id
+            ).all()
+            
+            result = {}
+            for ev in evidence_list:
+                ev_dict = {
+                    "type": ev.evidence_type,
+                    "page_number": ev.page_number,
+                    "snippet": ev.snippet,
+                    "content": ev.content,
+                    "confidence": ev.confidence,
+                    "bbox": ev.bbox
+                }
+                result[ev.evidence_key] = ev_dict
+            
+            return result
         finally:
             session.close()
 
