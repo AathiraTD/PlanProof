@@ -21,6 +21,9 @@ from planproof.pipeline.validate import load_rule_catalog, validate_extraction
 from planproof.pipeline.llm_gate import should_trigger_llm, resolve_with_llm_new
 from planproof.config import get_settings
 
+# Initialize settings at module level
+settings = get_settings()
+
 
 def _ensure_run_dirs(run_id: int) -> tuple:
     """Ensure run directories exist and return paths."""

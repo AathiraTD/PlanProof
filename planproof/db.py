@@ -310,7 +310,7 @@ class Run(Base):
     application_id = Column(Integer, ForeignKey("applications.id"), nullable=True, index=True)
     started_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    status = Column(String(20), nullable=False, default="running")  # running, completed, failed
+    status = Column(String(50), nullable=False, default="running")  # running, completed, failed, completed_with_errors
     error_message = Column(Text, nullable=True)
     run_metadata = Column(JSON, nullable=True)  # Additional run context (renamed from metadata to avoid SQLAlchemy conflict)
 
