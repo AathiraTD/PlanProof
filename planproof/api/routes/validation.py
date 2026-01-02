@@ -247,6 +247,17 @@ async def get_run_results(
                 detail="No document associated with this run"
             )
         
+        # Get documents for this run
+        documents = []
+        if run.document_id:
+            doc = session.query(Document).filter(Document.id == run.document_id).first()
+            if doc:
+                documents.append({
+                    "document_name": doc.filename,
+                    "document_type": doc.document_type or "Unknown",
+                    "status": "processed" if run.status == "completed" else "pending"
+                })
+        
         checks = session.query(ValidationCheck).filter(
             ValidationCheck.document_id == run.document_id
         ).all()
@@ -258,13 +269,23 @@ async def get_run_results(
             # Map ValidationCheck status enum to string
             status_str = check.status.value if hasattr(check.status, 'value') else str(check.status)
             
+            # Map status to proper severity
+            if status_str.lower() in ["fail", "failed", "critical", "blocker"]:
+                severity = "critical"
+            elif status_str.lower() in ["warning", "needs_review"]:
+                severity = "warning"
+            else:
+                severity = "info"
+            
             findings.append({
                 "rule_id": check.rule_id_string or str(check.rule_id),
-                "title": check.rule_id_string or str(check.rule_id),  # Use rule_id as title
+                "title": check.rule_id_string or str(check.rule_id),
                 "status": status_str,
-                "severity": "info",  # Default severity
+                "severity": severity,
                 "message": check.explanation or "",
-                "evidence": check.evidence_ids or []
+                "evidence": check.evidence_ids or [],
+                "details": {},
+                "document_name": document.filename if document else None
             })
             
             # Count by status
@@ -317,6 +338,7 @@ async def get_run_results(
             "run_id": run.id,
             "status": run.status,
             "summary": response_summary,
+            "documents": documents,
             "findings": findings,
             "llm_calls_per_run": llm_count,
             "extracted_fields": extracted_fields,

@@ -175,11 +175,6 @@ async def get_application_details(
         
         run_history = []
         for run in runs:
-            # Get documents for this run
-            documents = session.query(Document).filter(
-                Document.id == run.document_id
-            ).all() if run.document_id else []
-            
             # Count validation checks by status
             checks_pass = session.query(func.count(ValidationCheck.id)).filter(
                 ValidationCheck.document_id == run.document_id,
@@ -202,21 +197,9 @@ async def get_application_details(
             ).scalar() if run.document_id else 0
             
             run_history.append({
-                "run_id": run.id,
-                "run_type": run.run_type,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "id": run.id,
+                "created_at": run.started_at.isoformat() if run.started_at else None,
                 "status": run.status,
-                "error_message": run.error_message,
-                "document_count": len(documents),
-                "documents": [
-                    {
-                        "id": doc.id,
-                        "filename": doc.filename,
-                        "page_count": doc.page_count,
-                        "document_type": doc.document_type
-                    } for doc in documents
-                ],
                 "validation_summary": {
                     "pass": checks_pass,
                     "fail": checks_fail,
@@ -225,15 +208,18 @@ async def get_application_details(
                 }
             })
         
+        # Determine overall status from latest run
+        latest_status = runs[0].status if runs else "unknown"
+        
         return {
             "id": app.id,
-            "application_ref": app.application_ref,
-            "applicant_name": app.applicant_name,
-            "application_date": app.application_date.isoformat() if app.application_date else None,
+            "reference_number": app.application_ref,
+            "address": "Not available",
+            "proposal": "Planning Application",
+            "applicant_name": app.applicant_name or "Unknown",
             "created_at": app.created_at.isoformat() if app.created_at else None,
-            "updated_at": app.updated_at.isoformat() if app.updated_at else None,
-            "run_count": len(runs),
-            "runs": run_history
+            "status": latest_status,
+            "run_history": run_history
         }
     finally:
         session.close()
