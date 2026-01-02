@@ -3,12 +3,23 @@ All Runs Page - Complete run history with filters and search.
 """
 
 import streamlit as st
+import logging
 from typing import List, Dict, Any
 from planproof.db import Database, Run
+from planproof.ui.utils import (
+    handle_ui_errors,
+    safe_db_operation,
+    show_empty_state,
+    show_error,
+    with_spinner
+)
 from datetime import datetime, timedelta
 import json
 
+logger = logging.getLogger(__name__)
 
+
+@safe_db_operation
 def get_all_runs(
     search_query: str = "",
     status_filter: str = "all",
@@ -27,17 +38,17 @@ def get_all_runs(
     session = db.get_session()
 
     try:
-        query = session.query(Run).order_by(Run.created_at.desc())
+        query = session.query(Run).order_by(Run.started_at.desc())
 
         # Apply filters
         if status_filter != "all":
             query = query.filter(Run.status == status_filter)
 
         if date_from:
-            query = query.filter(Run.created_at >= date_from)
+            query = query.filter(Run.started_at >= date_from)
 
         if date_to:
-            query = query.filter(Run.created_at <= date_to)
+            query = query.filter(Run.started_at <= date_to)
 
         # Get total count before pagination
         total_count = query.count()
@@ -49,14 +60,16 @@ def get_all_runs(
         result = []
         for run in runs:
             # Parse metadata
-            metadata = run.metadata or {}
+            metadata = run.run_metadata or {}
             if isinstance(metadata, str):
                 try:
                     metadata = json.loads(metadata)
                 except:
                     metadata = {}
+            elif not isinstance(metadata, dict):
+                metadata = {}
 
-            app_ref = metadata.get("application_ref", "N/A")
+            app_ref = metadata.get("application_ref", "N/A") if isinstance(metadata, dict) else "N/A"
 
             # Apply search filter
             if search_query:
@@ -72,8 +85,8 @@ def get_all_runs(
                 "application_ref": app_ref,
                 "status": run.status,
                 "run_type": run.run_type or "unknown",
-                "created_at": run.created_at,
-                "updated_at": run.updated_at,
+                "created_at": run.started_at,
+                "updated_at": run.completed_at,
                 "error_message": run.error_message,
                 "file_count": metadata.get("file_count", 0),
                 "progress": progress_info,
@@ -87,6 +100,7 @@ def get_all_runs(
         session.close()
 
 
+@handle_ui_errors
 def render():
     """Render the All Runs page."""
 
@@ -149,8 +163,8 @@ def render():
 
     # Fetch runs
     page_size = 20
-    with st.spinner("Loading runs..."):
-        runs, total_count = get_all_runs(
+    with with_spinner("Loading runs..."):
+        result = get_all_runs(
             search_query=search_query,
             status_filter=status_filter,
             date_from=date_from,
@@ -158,6 +172,19 @@ def render():
             page=st.session_state.runs_page,
             page_size=page_size
         )
+        if result is None:
+            show_error("Failed to load runs. Please check database connection.")
+            return
+        runs, total_count = result
+
+    # Check if no runs
+    if not runs:
+        show_empty_state(
+            icon="📋",
+            title="No Runs Found",
+            message="No processing runs match your filters"
+        )
+        return
 
     # Summary metrics
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
