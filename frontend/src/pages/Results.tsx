@@ -208,7 +208,7 @@ export default function Results() {
               >
                 <Description sx={{ mr: 2, color: 'text.secondary' }} />
                 <ListItemText
-                  primary={doc.document_name || doc.filename || `Document ${index + 1}`}
+                  primary={doc.document_name || `Document ${index + 1}`}
                   secondary={doc.document_type || 'Unknown type'}
                 />
                 {doc.status === 'processed' && (
