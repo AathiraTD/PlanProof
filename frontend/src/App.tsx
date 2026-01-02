@@ -8,21 +8,35 @@ import AllRuns from './pages/AllRuns';
 import Results from './pages/Results';
 import ApplicationDetails from './pages/ApplicationDetails';
 import HILReview from './pages/HILReview';
+import { skipToMainContent } from './utils/accessibility';
+import './styles/accessibility.css';
 
 function App() {
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/new-application" replace />} />
-        <Route path="/new-application" element={<NewApplication />} />
-        <Route path="/my-cases" element={<MyCases />} />
-        <Route path="/applications/:applicationId" element={<ApplicationDetails />} />
-        <Route path="/applications/:applicationId/runs/:runId" element={<Results />} />
-        <Route path="/applications/:applicationId/runs/:runId/review" element={<HILReview />} />
-        <Route path="/all-runs" element={<AllRuns />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-      </Routes>
-    </Layout>
+    <>
+      <a
+        href="#main-content"
+        className="skip-link"
+        onClick={(e) => {
+          e.preventDefault();
+          skipToMainContent('main-content');
+        }}
+      >
+        Skip to main content
+      </a>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Navigate to="/new-application" replace />} />
+          <Route path="/new-application" element={<NewApplication />} />
+          <Route path="/my-cases" element={<MyCases />} />
+          <Route path="/applications/:applicationId" element={<ApplicationDetails />} />
+          <Route path="/applications/:applicationId/runs/:runId" element={<Results />} />
+          <Route path="/applications/:applicationId/runs/:runId/review" element={<HILReview />} />
+          <Route path="/all-runs" element={<AllRuns />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Routes>
+      </Layout>
+    </>
   );
 }
 

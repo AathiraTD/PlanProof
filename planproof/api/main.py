@@ -9,7 +9,7 @@ Authentication: All endpoints require authentication via JWT token or API key.
 - If neither is configured, authentication is bypassed (MVP mode only)
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -18,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 
 from planproof.config import get_settings
 from .routes import applications, documents, validation, health, runs, review
+from .dependencies import get_current_user
 
 settings = get_settings()
 
@@ -83,4 +84,27 @@ async def root():
         "version": "1.0.0",
         "status": "operational",
         "docs": "/api/docs"
+    }
+
+
+# User info endpoint for authentication
+@app.get("/api/v1/auth/user-info")
+async def get_user_info(user: dict = Depends(get_current_user)):
+    """
+    Get current user information from JWT token.
+    
+    Returns:
+        - user_id: User identifier
+        - role: User role (officer, admin, reviewer, planner, guest)
+        - auth_type: Authentication method (jwt, apikey, none)
+        - can_review: Boolean indicating if user can perform HIL reviews
+    """
+    allowed_review_roles = ['officer', 'admin', 'reviewer', 'planner']
+    user_role = user.get('role', 'guest')
+    
+    return {
+        "user_id": user.get('user_id'),
+        "role": user_role,
+        "auth_type": user.get('auth_type', 'none'),
+        "can_review": user_role in allowed_review_roles
     }

@@ -162,10 +162,47 @@ export const api = {
   },
 
   // HIL Review
+  getUserInfo: async () => {
+    // Extract user info from JWT token
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return { user_id: null, role: 'guest', auth_type: 'none' };
+    }
+    
+    try {
+      // Decode JWT payload (middle part)
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return {
+        user_id: payload.sub || payload.user_id || null,
+        role: payload.role || 'guest',
+        auth_type: payload.auth_type || 'jwt',
+      };
+    } catch (err) {
+      console.error('Failed to decode token:', err);
+      return { user_id: null, role: 'guest', auth_type: 'none' };
+    }
+  },
+
+  checkUserRole: async (allowedRoles: string[]) => {
+    try {
+      const response = await apiClient.get('/api/v1/auth/user-info');
+      const userInfo = response.data;
+      return allowedRoles.includes(userInfo.role);
+    } catch (err) {
+      console.error('Failed to check user role:', err);
+      // Fallback to local token check
+      const userInfo = await api.getUserInfo();
+      return allowedRoles.includes(userInfo.role);
+    }
+  },
+
   submitReviewDecision: async (runId: number, checkId: number, decision: string, comment?: string) => {
+    // Get real user ID from token
+    const userInfo = await api.getUserInfo();
     const response = await apiClient.post(`/api/v1/runs/${runId}/findings/${checkId}/review`, {
       decision,
       comment: comment || '',
+      user_id: userInfo.user_id || 1, // Fallback to 1 if no user_id
     });
     return response.data;
   },

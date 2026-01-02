@@ -50,7 +50,7 @@ export default function Layout({ children }: LayoutProps) {
           PlanProof
         </Typography>
       </Toolbar>
-      <List>
+      <List role="navigation" aria-label="Main navigation">
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
@@ -59,8 +59,10 @@ export default function Layout({ children }: LayoutProps) {
                 navigate(item.path);
                 setMobileOpen(false);
               }}
+              aria-label={`Navigate to ${item.text}`}
+              aria-current={location.pathname === item.path ? 'page' : undefined}
             >
-              <ListItemIcon>{item.icon}</ListItemIcon>
+              <ListItemIcon aria-hidden="true">{item.icon}</ListItemIcon>
               <ListItemText primary={item.text} />
             </ListItemButton>
           </ListItem>
@@ -84,6 +86,7 @@ export default function Layout({ children }: LayoutProps) {
             edge="start"
             onClick={handleDrawerToggle}
             sx={{ mr: 2, display: { sm: 'none' } }}
+            aria-label="Toggle navigation menu"
           >
             <MenuIcon />
           </IconButton>
@@ -95,6 +98,7 @@ export default function Layout({ children }: LayoutProps) {
       <Box
         component="nav"
         sx={{ width: { sm: DRAWER_WIDTH }, flexShrink: { sm: 0 } }}
+        aria-label="Site navigation"
       >
         <Drawer
           variant="temporary"
@@ -121,6 +125,7 @@ export default function Layout({ children }: LayoutProps) {
       </Box>
       <Box
         component="main"
+        id="main-content"
         sx={{
           flexGrow: 1,
           p: 3,
@@ -129,6 +134,8 @@ export default function Layout({ children }: LayoutProps) {
           bgcolor: '#f5f5f5',
           minHeight: '100vh',
         }}
+        role="main"
+        aria-label="Main content"
       >
         {children}
       </Box>

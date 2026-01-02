@@ -17,6 +17,14 @@ from planproof.services.review_report_service import generate_review_report_pdf
 router = APIRouter()
 
 
+# Role-based access control helper
+def check_review_permission(user: dict) -> bool:
+    """Check if user has permission to perform HIL reviews."""
+    allowed_roles = ['officer', 'admin', 'reviewer', 'planner']
+    user_role = user.get('role', 'guest')
+    return user_role in allowed_roles
+
+
 class ReviewDecisionRequest(BaseModel):
     """Request to submit a review decision."""
     decision: str  # accept, reject, need_info
@@ -66,6 +74,13 @@ async def submit_review_decision(
     """
     session = db.get_session()
     try:
+        # Check user permission
+        if not check_review_permission(user):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to submit review decisions"
+            )
+        
         # Validate run exists
         run = session.query(Run).filter(Run.id == run_id).first()
         if not run:
