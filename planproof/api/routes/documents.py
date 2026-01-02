@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 from planproof.api.dependencies import (
-    get_db, get_storage_client, get_docintel_client, get_aoai_client
+    get_db, get_storage_client, get_docintel_client, get_aoai_client, get_current_user
 )
 from planproof.db import Database
 from planproof.storage import StorageClient
@@ -43,7 +43,8 @@ async def upload_document(
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
-    aoai: AzureOpenAIClient = Depends(get_aoai_client)
+    aoai: AzureOpenAIClient = Depends(get_aoai_client),
+    user: dict = Depends(get_current_user)
 ) -> DocumentUploadResponse:
     """
     Upload a PDF document for processing.
