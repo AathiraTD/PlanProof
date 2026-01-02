@@ -313,12 +313,14 @@ const HILReview: React.FC = () => {
                 <IconButton
                   onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
                   disabled={currentIndex === 0}
+                  aria-label="Previous finding"
                 >
                   <NavigateBefore />
                 </IconButton>
                 <IconButton
                   onClick={() => setCurrentIndex(Math.min(findings.length - 1, currentIndex + 1))}
                   disabled={currentIndex === findings.length - 1}
+                  aria-label="Next finding"
                 >
                   <NavigateNext />
                 </IconButton>

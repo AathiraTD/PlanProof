@@ -339,7 +339,7 @@ async def get_run_results(
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
         
-        if run.status != "completed":
+        if run.status not in ["completed", "reviewed"]:
             raise HTTPException(
                 status_code=400,
                 detail=f"Run is not completed yet. Status: {run.status}"

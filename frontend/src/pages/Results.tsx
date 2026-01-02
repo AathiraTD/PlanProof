@@ -44,6 +44,7 @@ export default function Results() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [downloadingReport, setDownloadingReport] = useState(false);
 
   const loadResults = async (isBackground = false) => {
     if (!runId) return;
@@ -160,6 +161,24 @@ export default function Results() {
     return <Info color="info" />;
   };
 
+  const handleDownloadReport = async () => {
+    if (!runId) return;
+    try {
+      setDownloadingReport(true);
+      const blob = await api.downloadReviewReport(parseInt(runId));
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `run-${runId}-hil-review-report.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(getApiErrorMessage(err, 'Failed to download report'));
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       {refreshing && <LinearProgress sx={{ mb: 2 }} />}
@@ -187,6 +206,16 @@ export default function Results() {
             >
               Back to Case
             </Button>
+            {results.status === 'reviewed' && (
+              <Button
+                variant="contained"
+                startIcon={<Description />}
+                onClick={handleDownloadReport}
+                disabled={downloadingReport}
+              >
+                {downloadingReport ? 'Preparing report...' : 'Download report'}
+              </Button>
+            )}
             {hasReviewableFindings && (
               <Button
                 variant="contained"

@@ -166,7 +166,13 @@ export const api = {
     const response = await apiClient.post(`/api/v1/runs/${runId}/findings/${checkId}/review`, {
       decision,
       comment: comment || '',
-      reviewer_id: 1, // TODO: Replace with actual user ID from auth
+    });
+    return response.data;
+  },
+
+  downloadReviewReport: async (runId: number) => {
+    const response = await apiClient.get(`/api/v1/runs/${runId}/review-report`, {
+      responseType: 'blob',
     });
     return response.data;
   },
