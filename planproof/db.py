@@ -845,6 +845,22 @@ class Database:
         finally:
             session.close()
 
+    def get_application_by_id(self, application_id: int) -> Optional[Application]:
+        """Get an application by ID."""
+        session = self.get_session()
+        try:
+            return session.query(Application).filter(Application.id == application_id).first()
+        finally:
+            session.close()
+
+    def get_submission_by_id(self, submission_id: int) -> Optional[Submission]:
+        """Get a submission by ID."""
+        session = self.get_session()
+        try:
+            return session.query(Submission).filter(Submission.id == submission_id).first()
+        finally:
+            session.close()
+
     def get_document_by_blob_uri(self, blob_uri: str) -> Optional[Document]:
         """Get a document by blob URI."""
         session = self.get_session()
