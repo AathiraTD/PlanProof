@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -42,11 +42,7 @@ export default function NewApplication() {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
 
-  // Check backend health on mount
-  useState(() => {
-    checkBackendHealth();
-  });
-
+  // Check backend health function
   const checkBackendHealth = async () => {
     try {
       await fetch('http://localhost:8000/api/v1/health');
@@ -56,6 +52,11 @@ export default function NewApplication() {
       setError('Backend server is not running. Please start the backend server.');
     }
   };
+
+  // Check backend health on component mount
+  useEffect(() => {
+    checkBackendHealth();
+  }, []);
 
   const validateFiles = (newFiles: File[]): string[] => {
     const errors: string[] = [];
