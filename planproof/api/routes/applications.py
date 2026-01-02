@@ -175,26 +175,30 @@ async def get_application_details(
         
         run_history = []
         for run in runs:
+            document_ids = [doc.id for doc in run.documents] if run.documents else []
+            if not document_ids and run.document_id:
+                document_ids = [run.document_id]
+
             # Count validation checks by status
             checks_pass = session.query(func.count(ValidationCheck.id)).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'pass'
-            ).scalar() if run.document_id else 0
+            ).scalar() if document_ids else 0
             
             checks_fail = session.query(func.count(ValidationCheck.id)).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'fail'
-            ).scalar() if run.document_id else 0
+            ).scalar() if document_ids else 0
             
             checks_warning = session.query(func.count(ValidationCheck.id)).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'warning'
-            ).scalar() if run.document_id else 0
+            ).scalar() if document_ids else 0
             
             checks_needs_review = session.query(func.count(ValidationCheck.id)).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'needs_review'
-            ).scalar() if run.document_id else 0
+            ).scalar() if document_ids else 0
             
             run_history.append({
                 "id": run.id,
