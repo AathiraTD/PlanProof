@@ -150,9 +150,12 @@ async def get_review_status(
         
         # Get all validation checks that need review for this run's document
         checks_needing_review = []
-        if run.document_id:
+        document_ids = [doc.id for doc in run.documents] if run.documents else []
+        if not document_ids and run.document_id:
+            document_ids = [run.document_id]
+        if document_ids:
             checks_needing_review = session.query(ValidationCheck).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'needs_review'
             ).all()
         
@@ -230,9 +233,12 @@ async def complete_review(
         
         # Get findings needing review
         checks_needing_review = []
-        if run.document_id:
+        document_ids = [doc.id for doc in run.documents] if run.documents else []
+        if not document_ids and run.document_id:
+            document_ids = [run.document_id]
+        if document_ids:
             checks_needing_review = session.query(ValidationCheck).filter(
-                ValidationCheck.document_id == run.document_id,
+                ValidationCheck.document_id.in_(document_ids),
                 ValidationCheck.status == 'needs_review'
             ).all()
         
