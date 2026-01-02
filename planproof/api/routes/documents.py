@@ -106,7 +106,7 @@ async def upload_document(
         )
         
         # Link document to run
-        db.link_document_to_run(run["id"], ingested["document_id"])
+        db.link_document_to_run(run.id, ingested["document_id"])
         
         # Step 2: Extract (OCR with Document Intelligence)
         extraction = extract_from_pdf_bytes(
@@ -119,14 +119,14 @@ async def upload_document(
         )
         
         # Save extraction artifact
-        extraction_blob = f"runs/{run['id']}/extraction_{run['id']}.json"
+        extraction_blob = f"runs/{run.id}/extraction_{run.id}.json"
         extraction_url = storage.write_json_blob("artefacts", extraction_blob, extraction, overwrite=True)
         
         db.create_artefact_record(
             document_id=ingested["document_id"],
             artefact_type="extraction",
             blob_uri=extraction_url,
-            metadata={"run_id": run["id"]}
+            metadata={"run_id": run.id}
         )
         
         # Step 3: Validate
@@ -134,20 +134,20 @@ async def upload_document(
         validation = validate_extraction(
             extraction,
             rules,
-            context={"run_id": run["id"], "document_id": ingested["document_id"]},
+            context={"run_id": run.id, "document_id": ingested["document_id"]},
             db=db,
             write_to_tables=settings.enable_db_writes
         )
         
         # Save validation artifact
-        validation_blob = f"runs/{run['id']}/validation_{run['id']}.json"
+        validation_blob = f"runs/{run.id}/validation_{run.id}.json"
         validation_url = storage.write_json_blob("artefacts", validation_blob, validation, overwrite=True)
         
         db.create_artefact_record(
             document_id=ingested["document_id"],
             artefact_type="validation",
             blob_uri=validation_url,
-            metadata={"run_id": run["id"]}
+            metadata={"run_id": run.id}
         )
         
         # Step 4: LLM Gate (if needed)
@@ -173,21 +173,21 @@ async def upload_document(
                     db.update_submission_metadata(submission_id, {"resolved_fields": resolved_fields})
             
             # Save LLM notes
-            llm_blob = f"runs/{run['id']}/llm_notes_{run['id']}.json"
+            llm_blob = f"runs/{run.id}/llm_notes_{run.id}.json"
             llm_url = storage.write_json_blob("artefacts", llm_blob, llm_notes, overwrite=True)
             
             db.create_artefact_record(
                 document_id=ingested["document_id"],
                 artefact_type="llm_notes",
                 blob_uri=llm_url,
-                metadata={"run_id": run["id"]}
+                metadata={"run_id": run.id}
             )
         
         # Update run status
-        db.update_run(run["id"], status="completed")
+        db.update_run(run.id, status="completed")
 
         return DocumentUploadResponse(
-            run_id=run["id"],
+            run_id=run.id,
             document_id=ingested["document_id"],
             application_ref=application_ref,
             filename=file.filename,
@@ -198,7 +198,7 @@ async def upload_document(
 
     except Exception as e:
         # Update run with error
-        db.update_run(run["id"], status="failed", error_message=str(e))
+        db.update_run(run.id, status="failed", error_message=str(e))
 
         raise HTTPException(
             status_code=500,

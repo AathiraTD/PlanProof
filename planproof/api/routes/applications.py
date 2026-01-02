@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 
 from planproof.api.dependencies import get_db, get_current_user
-from planproof.db import Database, Application, Submission
+from planproof.db import Database, Application, Submission, Run
 
 router = APIRouter()
 
@@ -21,6 +21,9 @@ class ApplicationResponse(BaseModel):
     created_at: str
     updated_at: Optional[str]
     submission_count: int
+    latest_run_id: Optional[int] = None
+    run_count: int = 0
+    status: str = "unknown"  # based on latest run status
 
 
 class ApplicationCreateRequest(BaseModel):
@@ -58,13 +61,36 @@ async def list_applications(
 
         results = []
         for app, submission_count in apps_with_counts:
+            # Get latest run for this application
+            latest_run = session.query(Run).filter(
+                Run.application_id == app.id
+            ).order_by(Run.started_at.desc()).first()
+            
+            # Count total runs for this application
+            run_count = session.query(func.count(Run.id)).filter(
+                Run.application_id == app.id
+            ).scalar() or 0
+            
+            # Determine status from latest run
+            status = "unknown"
+            if latest_run:
+                if latest_run.status == "completed":
+                    status = "completed"
+                elif latest_run.status == "failed":
+                    status = "issues"
+                elif latest_run.status in ["pending", "running"]:
+                    status = "processing"
+            
             results.append(ApplicationResponse(
                 id=app.id,
                 application_ref=app.application_ref,
                 applicant_name=app.applicant_name,
                 created_at=app.created_at.isoformat() if app.created_at else None,
                 updated_at=app.updated_at.isoformat() if app.updated_at else None,
-                submission_count=submission_count
+                submission_count=submission_count,
+                latest_run_id=latest_run.id if latest_run else None,
+                run_count=run_count,
+                status=status
             ))
 
         return results

@@ -39,6 +39,7 @@ export default function NewApplication() {
   const [fileProgress, setFileProgress] = useState<Map<string, FileProgress>>(new Map());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
 
@@ -281,6 +282,7 @@ export default function NewApplication() {
 
           if (result.run_id) {
             lastRunId = result.run_id;
+            setLastRunId(result.run_id);
           }
         } catch (fileErr: any) {
           console.error(`Upload error for ${file.name}:`, fileErr);
@@ -544,7 +546,7 @@ export default function NewApplication() {
             {success && (
               <Alert severity="success">
                 <AlertTitle>Success</AlertTitle>
-                All files uploaded successfully! Redirecting to results...
+                All files uploaded successfully!{lastRunId && ` Run ID: ${lastRunId}.`} Redirecting to results...
               </Alert>
             )}
 

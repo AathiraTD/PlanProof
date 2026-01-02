@@ -240,32 +240,87 @@ async def get_run_results(
                 detail=f"Run is not completed yet. Status: {run.status}"
             )
         
-        # Get validation checks
+        # Get validation checks for the document associated with this run
+        if not run.document_id:
+            raise HTTPException(
+                status_code=404,
+                detail="No document associated with this run"
+            )
+        
         checks = session.query(ValidationCheck).filter(
-            ValidationCheck.run_id == run.id
+            ValidationCheck.document_id == run.document_id
         ).all()
         
         summary = {"pass": 0, "fail": 0, "warning": 0, "needs_review": 0}
         findings = []
         
         for check in checks:
+            # Map ValidationCheck status enum to string
+            status_str = check.status.value if hasattr(check.status, 'value') else str(check.status)
+            
             findings.append({
-                "rule_id": check.rule_id,
-                "title": check.title or check.rule_id,
-                "status": check.status,
-                "severity": check.severity or "info",
-                "message": check.message,
-                "evidence": check.evidence_data or []
+                "rule_id": check.rule_id_string or str(check.rule_id),
+                "title": check.rule_id_string or str(check.rule_id),  # Use rule_id as title
+                "status": status_str,
+                "severity": "info",  # Default severity
+                "message": check.explanation or "",
+                "evidence": check.evidence_ids or []
             })
             
-            if check.status in summary:
-                summary[check.status] += 1
+            # Count by status
+            if status_str.lower() in ["pass", "passed"]:
+                summary["pass"] += 1
+            elif status_str.lower() in ["fail", "failed"]:
+                summary["fail"] += 1
+            elif status_str.lower() == "warning":
+                summary["warning"] += 1
+            else:
+                summary["needs_review"] += 1
+        
+        # Get document details to show extracted fields
+        document = None
+        extracted_fields = {}
+        if run.document_id:
+            document = session.query(Document).filter(Document.id == run.document_id).first()
+            if document:
+                # Get extraction artefact to show extracted fields
+                extraction_artefact = session.query(Artefact).filter(
+                    Artefact.document_id == document.id,
+                    Artefact.artefact_type == "extraction"
+                ).first()
+                
+                if extraction_artefact and extraction_artefact.blob_uri:
+                    # Note: In production, would fetch from blob storage
+                    # For now, just indicate it exists
+                    extracted_fields = {"note": "Extraction data available at blob storage"}
+        
+        # Count LLM calls from artefacts
+        llm_count = 0
+        if run.document_id:
+            llm_count = session.query(Artefact).filter(
+                Artefact.document_id == run.document_id,
+                Artefact.artefact_type == "llm_notes"
+            ).count()
+        
+        # Build response with correct structure
+        response_summary = {
+            "total_documents": 1 if run.document_id else 0,
+            "processed": 1 if run.status == "completed" and run.document_id else 0,
+            "errors": 1 if run.status == "failed" else 0,
+            "pass": summary["pass"],
+            "fail": summary["fail"],
+            "warning": summary["warning"],
+            "needs_review": summary["needs_review"]
+        }
         
         return {
             "run_id": run.id,
             "status": run.status,
-            "summary": summary,
+            "summary": response_summary,
             "findings": findings,
+            "llm_calls_per_run": llm_count,
+            "extracted_fields": extracted_fields,
+            "document_name": document.filename if document else None,
             "completed_at": run.completed_at.isoformat() if run.completed_at else None
         }
     finally:
