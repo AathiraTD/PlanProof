@@ -8,6 +8,9 @@ enhanced issue model, allowing gradual migration while maintaining backward comp
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
+import logging
+
+LOGGER = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -291,12 +294,12 @@ def convert_all_findings(
             enhanced_issues.append(enhanced_issue)
         except Exception as e:
             # Log error but continue processing
-            print(f"Warning: Failed to convert finding {finding.get('rule_id')}: {e}")
+            LOGGER.warning(f"Failed to convert finding {finding.get('rule_id')}: {e}")
             # Still create a basic issue
             try:
                 enhanced_issue = _create_generic_enhanced_issue(finding, run_id)
                 enhanced_issues.append(enhanced_issue)
             except Exception as e2:
-                print(f"Error: Could not create even basic issue: {e2}")
+                LOGGER.error(f"Could not create even basic issue: {e2}")
     
     return enhanced_issues

@@ -401,7 +401,8 @@ def extract_from_pdf_bytes(
                 session.flush()
                 for page in new_pages:
                     page_map[page.page_number] = page.id
-        except Exception:
+        except Exception as e:
+            LOGGER.error(f"Failed to create page records in database: {str(e)}", exc_info=True)
             session.rollback()
             session.close()
             session = None
@@ -512,7 +513,8 @@ def extract_from_pdf_bytes(
                     ))
                 session.add_all(extracted_field_records)
             session.commit()
-        except Exception:
+        except Exception as e:
+            LOGGER.error(f"Failed to persist extracted fields to database: {str(e)}", exc_info=True)
             session.rollback()
         finally:
             session.close()

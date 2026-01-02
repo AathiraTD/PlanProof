@@ -5,12 +5,15 @@ Results page - Display validation results and findings.
 import streamlit as st
 import json
 import zipfile
+import logging
 from pathlib import Path
 from datetime import datetime
 from planproof.ui.run_orchestrator import get_run_results
 from planproof.ui.components.document_viewer import render_document_viewer, check_pdf_library
 from planproof.services.officer_override import create_override, get_override_history
 from planproof.db import Database
+
+LOGGER = logging.getLogger(__name__)
 
 # Enhanced issue display components
 try:
@@ -23,7 +26,7 @@ try:
     ENHANCED_ISSUES_AVAILABLE = True
 except ImportError as e:
     ENHANCED_ISSUES_AVAILABLE = False
-    print(f"Enhanced issue components not available: {e}")
+    LOGGER.warning(f"Enhanced issue components not available: {e}")
 
 
 def _render_enhanced_issues_view(findings: list, run_id: int) -> None:
