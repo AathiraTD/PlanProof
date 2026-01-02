@@ -240,4 +240,28 @@ export const api = {
     });
     return response.data;
   },
+
+  // Authentication
+  login: async (username: string, password: string) => {
+    const response = await apiClient.post('/api/v1/auth/login', {
+      username,
+      password,
+    });
+    return response.data;
+  },
+
+  getCurrentUser: async () => {
+    const response = await apiClient.get('/api/v1/auth/me');
+    return response.data;
+  },
+
+  refreshToken: async () => {
+    const response = await apiClient.post('/api/v1/auth/refresh');
+    return response.data;
+  },
+
+  logout: async () => {
+    const response = await apiClient.post('/api/v1/auth/logout');
+    return response.data;
+  },
 };

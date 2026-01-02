@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { AuthProvider } from './contexts/AuthContext';
 import App from './App';
 
 const theme = createTheme({
@@ -79,7 +80,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     >
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>

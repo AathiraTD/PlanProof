@@ -12,6 +12,10 @@ import {
   ListItemText,
   Toolbar,
   Typography,
+
+  Menu,
+  MenuItem,
+  Chip,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -19,7 +23,10 @@ import {
   Folder,
   PlaylistAddCheck,
   Dashboard as DashboardIcon,
+  AccountCircle,
+  Logout,
 } from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
 
 const DRAWER_WIDTH = 240;
 
@@ -36,11 +43,38 @@ const menuItems = [
 
 export default function Layout({ children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
+  };
+
+  const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleUserMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleUserMenuClose();
+    logout();
+    navigate('/login');
+  };
+
+  const getRoleColor = (role: string) => {
+    const colors: Record<string, 'primary' | 'secondary' | 'success' | 'warning' | 'default'> = {
+      admin: 'secondary',
+      officer: 'primary',
+      planner: 'success',
+      reviewer: 'success',
+      guest: 'default',
+    };
+    return colors[role] || 'default';
   };
 
   const drawer = (
@@ -90,9 +124,59 @@ export default function Layout({ children }: LayoutProps) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             Planning Application Validation System
           </Typography>
+
+          {/* User Info & Logout */}
+          {user && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip
+                label={user.role.toUpperCase()}
+                color={getRoleColor(user.role)}
+                size="small"
+                sx={{ fontWeight: 600 }}
+              />
+              <IconButton
+                color="inherit"
+                onClick={handleUserMenuOpen}
+                aria-label="User menu"
+                aria-haspopup="true"
+              >
+                <AccountCircle />
+              </IconButton>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={handleUserMenuClose}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+              >
+                <MenuItem disabled>
+                  <Box>
+                    <Typography variant="body2" fontWeight="600">
+                      {user.username}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {user.user_id}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+                <MenuItem onClick={handleLogout}>
+                  <ListItemIcon>
+                    <Logout fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Logout</ListItemText>
+                </MenuItem>
+              </Menu>
+            </Box>
+          )}
         </Toolbar>
       </AppBar>
       <Box

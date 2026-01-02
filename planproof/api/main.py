@@ -17,7 +17,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from planproof.config import get_settings
-from .routes import applications, documents, validation, health, runs, review
+from .routes import applications, documents, validation, health, runs, review, auth
 from .dependencies import get_current_user
 
 settings = get_settings()
@@ -55,6 +55,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(applications.router, prefix="/api/v1", tags=["Applications"])
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
