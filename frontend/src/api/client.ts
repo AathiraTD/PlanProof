@@ -7,6 +7,8 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 120000, // 2 minutes timeout for file uploads
+  timeoutErrorMessage: 'Request timeout - file upload took too long',
 });
 
 // Request interceptor for auth
@@ -25,10 +27,25 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+    // Enhanced error handling
+    if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
+      error.message = 'Upload timeout - please try again with a smaller file or check your connection';
     }
+
+    if (error.code === 'ERR_NETWORK') {
+      error.message = 'Network error - cannot connect to backend server';
+    }
+
+    if (error.response?.status === 401) {
+      // Only redirect to login if auth is actually configured
+      const hasToken = localStorage.getItem('token');
+      if (hasToken) {
+        localStorage.removeItem('token');
+        // Note: Login page doesn't exist yet, so just clear token for now
+        console.warn('Authentication failed - token cleared');
+      }
+    }
+
     return Promise.reject(error);
   }
 );
