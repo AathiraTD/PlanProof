@@ -106,6 +106,8 @@ class Document(Base):
     artefacts = relationship("Artefact", back_populates="document", cascade="all, delete-orphan")
     validation_results = relationship("ValidationResult", back_populates="document", cascade="all, delete-orphan")
     validation_checks = relationship("ValidationCheck", back_populates="document", cascade="all, delete-orphan")
+    run_documents = relationship("RunDocument", back_populates="document", cascade="all, delete-orphan")
+    runs = relationship("Run", secondary="run_documents", viewonly=True)
 
 
 class Page(Base):
@@ -362,6 +364,23 @@ class Run(Base):
     error_message = Column(Text, nullable=True)
     run_metadata = Column(JSON, nullable=True)  # Additional run context (renamed from metadata to avoid SQLAlchemy conflict)
 
+    # Relationships
+    run_documents = relationship("RunDocument", back_populates="run", cascade="all, delete-orphan")
+    documents = relationship("Document", secondary="run_documents", viewonly=True)
+
+
+class RunDocument(Base):
+    """Join table linking runs to multiple documents."""
+    __tablename__ = "run_documents"
+
+    run_id = Column(Integer, ForeignKey("runs.id"), primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    # Relationships
+    run = relationship("Run", back_populates="run_documents")
+    document = relationship("Document", back_populates="run_documents")
+
 
 class IssueResolution(Base):
     """Track resolution of validation issues."""
@@ -597,19 +616,28 @@ class Database:
         run_type: str = "ui_single",
         application_id: Optional[int] = None,
         document_id: Optional[int] = None,
+        document_ids: Optional[List[int]] = None,
         metadata: Optional[Dict] = None
     ) -> Run:
         """Create a new run - matches Run model fields exactly."""
         session = self.get_session()
         try:
+            doc_ids: List[int] = list(document_ids or [])
+            if document_id is not None and document_id not in doc_ids:
+                doc_ids.insert(0, document_id)
+
             run = Run(
                 run_type=run_type,
                 application_id=application_id,
-                document_id=document_id,
+                document_id=doc_ids[0] if doc_ids else None,
                 run_metadata=metadata or {},
                 status="pending"
             )
             session.add(run)
+            session.flush()
+
+            for doc_id in doc_ids:
+                session.add(RunDocument(run_id=run.id, document_id=doc_id))
             session.commit()
             session.refresh(run)
             return run
@@ -916,7 +944,7 @@ class Database:
             session.close()
 
     def link_document_to_run(self, run_id: int, document_id: int):
-        """Link a document to a run by updating the run's document_id.
+        """Link a document to a run by creating a RunDocument entry.
 
         Args:
             run_id: Run ID
@@ -931,7 +959,14 @@ class Database:
             run = session.query(Run).filter(Run.id == run_id).first()
             if not run:
                 raise ValueError(f"Run {run_id} not found")
-            run.document_id = document_id
+            existing = session.query(RunDocument).filter(
+                RunDocument.run_id == run_id,
+                RunDocument.document_id == document_id
+            ).first()
+            if not existing:
+                session.add(RunDocument(run_id=run_id, document_id=document_id))
+            if not run.document_id:
+                run.document_id = document_id
             session.commit()
         except ValueError:
             # Re-raise ValueError without rollback (no changes made)
