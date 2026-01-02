@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from planproof.api.dependencies import get_db
+from planproof.api.dependencies import get_db, get_current_user
 from planproof.db import Database, Run, Document, ValidationCheck, Artefact
 
 router = APIRouter()
@@ -46,7 +46,8 @@ class ValidationResults(BaseModel):
 @router.get("/applications/{application_ref}/status")
 async def get_validation_status(
     application_ref: str,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ) -> List[RunStatus]:
     """
     Get processing status for all runs of an application.
@@ -89,7 +90,8 @@ async def get_validation_status(
 @router.get("/runs/{run_id}/status")
 async def get_run_status(
     run_id: int,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ) -> RunStatus:
     """
     Get status of a specific processing run.
@@ -120,7 +122,8 @@ async def get_run_status(
 async def get_validation_results(
     application_ref: str,
     run_id: Optional[int] = Query(None, description="Specific run ID (latest if not provided)"),
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ) -> ValidationResults:
     """
     Get validation results for an application.
@@ -215,7 +218,8 @@ async def get_validation_results(
 @router.get("/runs/{run_id}/results")
 async def get_run_results(
     run_id: int,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ):
     """
     Get validation results for a specific run.

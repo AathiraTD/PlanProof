@@ -8,6 +8,9 @@ import streamlit as st
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 import io
+import logging
+
+LOGGER = logging.getLogger(__name__)
 
 try:
     import fitz  # PyMuPDF
@@ -143,7 +146,8 @@ def _get_page_count(pdf_path: str) -> int:
             return info.get("Pages", 0)
         else:
             return 0
-    except Exception:
+    except Exception as e:
+        LOGGER.warning(f"Failed to get PDF page count for {pdf_path}: {str(e)}")
         return 0
 
 

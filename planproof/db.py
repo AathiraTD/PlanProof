@@ -60,6 +60,16 @@ class Submission(Base):
     parent_submission_id = Column(Integer, ForeignKey("submissions.id"), nullable=True, index=True)  # For modifications
     status = Column(String(20), nullable=False, default="pending")  # pending, processing, completed, failed
     submission_metadata = Column(JSON, nullable=True)  # resolved_fields, llm_calls_per_submission, etc.
+
+    # Submission type classification (modification vs new construction)
+    submission_type = Column(
+        String(50),
+        nullable=True,  # Nullable for backward compatibility with existing data
+        default="new_construction"
+    )  # Values: "modification", "new_construction", "resubmission"
+    submission_type_confidence = Column(Float, nullable=True)  # 0.0-1.0 from LLM classification
+    submission_type_source = Column(String(20), nullable=True)  # "llm", "user", "heuristic"
+
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -353,454 +363,6 @@ class Run(Base):
     run_metadata = Column(JSON, nullable=True)  # Additional run context (renamed from metadata to avoid SQLAlchemy conflict)
 
 
-class Database:
-    """Database helper class for common operations."""
-
-    def __init__(self, database_url: Optional[str] = None):
-        """Initialize database connection."""
-        settings = get_settings()
-        self.database_url = database_url or settings.database_url
-        # Ensure we use psycopg (psycopg3) driver, not psycopg2
-        if self.database_url.startswith("postgresql://"):
-            self.database_url = self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        elif self.database_url.startswith("postgres://"):
-            self.database_url = self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
-        # Configure connection pool to prevent exhaustion
-        self.engine = create_engine(
-            self.database_url,
-            echo=False,
-            pool_size=5,  # Limit pool size
-            max_overflow=10,  # Allow overflow connections
-            pool_pre_ping=True,  # Verify connections before using
-            pool_recycle=3600  # Recycle connections after 1 hour
-        )
-        self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
-
-    def create_tables(self):
-        """Create all tables (use Alembic for migrations in production)."""
-        Base.metadata.create_all(self.engine)
-
-    def get_session(self) -> Session:
-        """Get a database session."""
-        return self.SessionLocal()
-
-    def execute_raw(self, query: str, params: Optional[Any] = None) -> List[Dict[str, Any]]:
-        """
-        Execute a raw SQL query and return results as dictionaries.
-
-        Args:
-            query: SQL query string
-            params: Optional query parameters (tuple, dict, or None)
-
-        Returns:
-            List of result dictionaries
-        """
-        # Get raw database URL (psycopg needs postgresql:// not postgresql+psycopg://)
-        raw_url = self.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-        with psycopg.connect(raw_url) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                if params is None:
-                    cur.execute(query)
-                else:
-                    cur.execute(query, params)
-                return cur.fetchall()
-
-    def create_application(
-        self,
-        application_ref: str,
-        applicant_name: Optional[str] = None,
-        application_date: Optional[datetime] = None
-    ) -> Application:
-        """Create a new application record."""
-        session = self.get_session()
-        try:
-            app = Application(
-                application_ref=application_ref,
-                applicant_name=applicant_name,
-                application_date=application_date
-            )
-            session.add(app)
-            session.commit()
-            session.refresh(app)
-            return app
-        finally:
-            session.close()
-
-    def get_application_by_ref(self, application_ref: str) -> Optional[Application]:
-        """Get an application by reference."""
-        session = self.get_session()
-        try:
-            return session.query(Application).filter(Application.application_ref == application_ref).first()
-        finally:
-            session.close()
-
-    def create_document(
-        self,
-        application_id: int,
-        blob_uri: str,
-        filename: str,
-        page_count: Optional[int] = None,
-        docintel_model: Optional[str] = None,
-        content_hash: Optional[str] = None,
-        submission_id: Optional[int] = None
-    ) -> Document:
-        """Create a new document record."""
-        session = self.get_session()
-        try:
-            doc = Document(
-                application_id=application_id,
-                submission_id=submission_id,
-                blob_uri=blob_uri,
-                filename=filename,
-                page_count=page_count,
-                docintel_model=docintel_model,
-                content_hash=content_hash
-            )
-            session.add(doc)
-            session.commit()
-            session.refresh(doc)
-            return doc
-        finally:
-            session.close()
-
-    def get_document_by_blob_uri(self, blob_uri: str) -> Optional[Document]:
-        """Get a document by blob URI."""
-        session = self.get_session()
-        try:
-            return session.query(Document).filter(Document.blob_uri == blob_uri).first()
-        finally:
-            session.close()
-
-    def create_run(
-        self,
-        run_type: str,
-        document_id: Optional[int] = None,
-        application_id: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Create a new run record."""
-        session = self.get_session()
-        try:
-            run = Run(
-                run_type=run_type,
-                document_id=document_id,
-                application_id=application_id,
-                run_metadata=metadata or {}
-            )
-            session.add(run)
-            session.commit()
-            session.refresh(run)
-            return {
-                "id": run.id,
-                "run_type": run.run_type,
-                "document_id": run.document_id,
-                "application_id": run.application_id,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "status": run.status
-            }
-        finally:
-            session.close()
-
-    def create_artefact_record(
-        self,
-        document_id: int,
-        artefact_type: str,
-        blob_uri: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Create a new artefact record."""
-        session = self.get_session()
-        try:
-            artefact = Artefact(
-                document_id=document_id,
-                artefact_type=artefact_type,
-                blob_uri=blob_uri,
-                artefact_metadata=metadata or {}
-            )
-            session.add(artefact)
-            session.commit()
-            session.refresh(artefact)
-            return {
-                "id": artefact.id,
-                "document_id": artefact.document_id,
-                "artefact_type": artefact.artefact_type,
-                "blob_uri": artefact.blob_uri,
-                "created_at": artefact.created_at.isoformat() if artefact.created_at else None
-            }
-        finally:
-            session.close()
-
-    def link_document_to_run(self, run_id: int, document_id: int):
-        """Link a document to a run by updating the run's document_id."""
-        session = self.get_session()
-        try:
-            run = session.query(Run).filter(Run.id == run_id).first()
-            if run:
-                run.document_id = document_id
-                session.commit()
-        finally:
-            session.close()
-
-    def update_run(
-        self,
-        run_id: int,
-        status: Optional[str] = None,
-        error_message: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        """Update a run record."""
-        session = self.get_session()
-        try:
-            run = session.query(Run).filter(Run.id == run_id).first()
-            if run:
-                if status:
-                    run.status = status
-                if error_message:
-                    run.error_message = error_message
-                if metadata:
-                    # Merge with existing metadata
-                    existing = run.run_metadata or {}
-                    existing.update(metadata)
-                    run.run_metadata = existing
-                run.completed_at = datetime.now(timezone.utc)
-                session.commit()
-        finally:
-            session.close()
-
-    def get_resolved_fields_for_submission(self, submission_id: int) -> Dict[str, Any]:
-        """Get resolved fields cache for a submission."""
-        session = self.get_session()
-        try:
-            submission = session.query(Submission).filter(Submission.id == submission_id).first()
-            if submission and submission.submission_metadata:
-                return submission.submission_metadata.get("resolved_fields", {})
-            return {}
-        finally:
-            session.close()
-    
-    def get_resolved_fields_for_application(self, application_ref: str) -> Dict[str, Any]:
-        """
-        Get all resolved fields from previous submissions for a given application_ref.
-        
-        This implements application-level caching: if a field was resolved in any
-        previous submission for this application, it won't be asked again.
-        
-        Args:
-            application_ref: Application reference string
-            
-        Returns:
-            Dictionary of resolved fields {field_name: value}
-        """
-        session = self.get_session()
-        try:
-            # Get planning case (application)
-            app = session.query(Application).filter(Application.application_ref == application_ref).first()
-            if not app:
-                return {}
-            
-            # Query all submissions for this planning case
-            submissions = session.query(Submission).filter(
-                Submission.planning_case_id == app.id
-            ).order_by(Submission.created_at.desc()).all()
-            
-            resolved_fields = {}
-            for submission in submissions:
-                if submission.submission_metadata:
-                    submission_resolved = submission.submission_metadata.get("resolved_fields", {})
-                    if submission_resolved:
-                        resolved_fields.update(submission_resolved)
-            
-            return resolved_fields
-        finally:
-            session.close()
-
-    def update_submission_metadata(
-        self,
-        submission_id: int,
-        metadata_updates: Dict[str, Any]
-    ):
-        """
-        Update submission metadata by merging with existing metadata.
-        
-        Args:
-            submission_id: Submission ID
-            metadata_updates: Dictionary of metadata fields to update/merge
-        """
-        session = self.get_session()
-        try:
-            submission = session.query(Submission).filter(Submission.id == submission_id).first()
-            if submission:
-                # Merge with existing metadata
-                existing_metadata = submission.submission_metadata or {}
-                existing_metadata.update(metadata_updates)
-                submission.submission_metadata = existing_metadata
-                submission.updated_at = datetime.now(timezone.utc)
-                session.commit()
-        finally:
-            session.close()
-
-    def create_submission(
-        self,
-        planning_case_id: int,
-        submission_version: str = "V0",
-        parent_submission_id: Optional[int] = None,
-        status: str = "pending",
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Submission:
-        """Create a new submission record."""
-        session = self.get_session()
-        try:
-            submission = Submission(
-                planning_case_id=planning_case_id,
-                submission_version=submission_version,
-                parent_submission_id=parent_submission_id,
-                status=status,
-                submission_metadata=metadata or {}
-            )
-            session.add(submission)
-            session.commit()
-            session.refresh(submission)
-            return submission
-        finally:
-            session.close()
-
-    def get_submission_by_version(
-        self,
-        planning_case_id: int,
-        submission_version: str
-    ) -> Optional[Submission]:
-        """Get a submission by planning case and version."""
-        session = self.get_session()
-        try:
-            return session.query(Submission).filter(
-                Submission.planning_case_id == planning_case_id,
-                Submission.submission_version == submission_version
-            ).first()
-        finally:
-            session.close()
-
-    def create_page(
-        self,
-        document_id: int,
-        page_number: int,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Page:
-        """Create a new page record."""
-        session = self.get_session()
-        try:
-            page = Page(
-                document_id=document_id,
-                page_number=page_number,
-                page_metadata=metadata or {}
-            )
-            session.add(page)
-            session.commit()
-            session.refresh(page)
-            return page
-        finally:
-            session.close()
-
-    def create_pages_bulk(
-        self,
-        pages: List[Page],
-        session: Optional[Session] = None
-    ) -> List[Page]:
-        """Create multiple page records in a single transaction."""
-        owns_session = session is None
-        if session is None:
-            session = self.get_session()
-        try:
-            session.add_all(pages)
-            session.commit()
-            for page in pages:
-                session.refresh(page)
-            return pages
-        finally:
-            if owns_session:
-                session.close()
-
-    def create_evidence(
-        self,
-        document_id: int,
-        page_number: int,
-        evidence_type: str,
-        evidence_key: str,
-        snippet: Optional[str] = None,
-        content: Optional[str] = None,
-        confidence: Optional[float] = None,
-        bbox: Optional[Dict[str, Any]] = None,
-        page_id: Optional[int] = None
-    ) -> Evidence:
-        """Create a new evidence record."""
-        session = self.get_session()
-        try:
-            evidence = Evidence(
-                document_id=document_id,
-                page_id=page_id,
-                page_number=page_number,
-                evidence_type=evidence_type,
-                evidence_key=evidence_key,
-                snippet=snippet,
-                content=content,
-                confidence=confidence,
-                bbox=bbox
-            )
-            session.add(evidence)
-            session.commit()
-            session.refresh(evidence)
-            return evidence
-        finally:
-            session.close()
-
-    def create_evidence_bulk(
-        self,
-        evidence_items: List[Evidence],
-        session: Optional[Session] = None
-    ) -> List[Evidence]:
-        """Create multiple evidence records in a single transaction."""
-        owns_session = session is None
-        if session is None:
-            session = self.get_session()
-        try:
-            session.add_all(evidence_items)
-            session.commit()
-            for evidence in evidence_items:
-                session.refresh(evidence)
-            return evidence_items
-        finally:
-            if owns_session:
-                session.close()
-
-    def create_extracted_field(
-        self,
-        submission_id: int,
-        field_name: str,
-        field_value: Optional[str] = None,
-        field_unit: Optional[str] = None,
-        confidence: Optional[float] = None,
-        extractor: Optional[str] = None,
-        evidence_id: Optional[int] = None
-    ) -> ExtractedField:
-        """Create a new extracted field record."""
-        session = self.get_session()
-        try:
-            field = ExtractedField(
-                submission_id=submission_id,
-                field_name=field_name,
-                field_value=field_value,
-                field_unit=field_unit,
-                confidence=confidence,
-                extractor=extractor,
-                evidence_id=evidence_id
-            )
-            session.add(field)
-            session.commit()
-            session.refresh(field)
-            return field
-        finally:
-            session.close()
-
-
 class IssueResolution(Base):
     """Track resolution of validation issues."""
     __tablename__ = "issue_resolutions"
@@ -893,9 +455,17 @@ class Database:
         db_url = settings.database_url
         if db_url.startswith("postgresql://"):
             db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        
-        self.conn_str = db_url  # Store for reference
-        self.engine = create_engine(db_url, echo=False)
+
+        self.database_url = db_url  # Store for reference (renamed from conn_str for consistency)
+        # Configure connection pool to prevent exhaustion under load
+        self.engine = create_engine(
+            db_url,
+            echo=False,
+            pool_size=20,          # Increased from 5 for better concurrency
+            max_overflow=30,       # Increased from 10 for burst traffic
+            pool_pre_ping=True,    # Verify connections before using
+            pool_recycle=1800      # Recycle connections every 30 min
+        )
         self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
 
     def get_session(self) -> Session:
@@ -1218,5 +788,376 @@ class Database:
             session.commit()
             session.refresh(recheck)
             return recheck
+        finally:
+            session.close()
+
+    # Methods from first Database class that were missing
+
+    def create_tables(self):
+        """Create all tables (use Alembic for migrations in production)."""
+        Base.metadata.create_all(self.engine)
+
+    def execute_raw(self, query: str, params: Optional[Any] = None) -> List[Dict[str, Any]]:
+        """
+        Execute a raw SQL query and return results as dictionaries.
+
+        Args:
+            query: SQL query string
+            params: Optional query parameters (tuple, dict, or None)
+
+        Returns:
+            List of result dictionaries
+        """
+        # Get raw database URL (psycopg needs postgresql:// not postgresql+psycopg://)
+        raw_url = self.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        with psycopg.connect(raw_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                if params is None:
+                    cur.execute(query)
+                else:
+                    cur.execute(query, params)
+                return cur.fetchall()
+
+    def get_application_by_ref(self, application_ref: str) -> Optional[Application]:
+        """Get an application by reference."""
+        session = self.get_session()
+        try:
+            return session.query(Application).filter(Application.application_ref == application_ref).first()
+        finally:
+            session.close()
+
+    def get_document_by_blob_uri(self, blob_uri: str) -> Optional[Document]:
+        """Get a document by blob URI."""
+        session = self.get_session()
+        try:
+            return session.query(Document).filter(Document.blob_uri == blob_uri).first()
+        finally:
+            session.close()
+
+    def create_artefact_record(
+        self,
+        document_id: int,
+        artefact_type: str,
+        blob_uri: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a new artefact record.
+
+        Args:
+            document_id: Document ID
+            artefact_type: Type of artefact
+            blob_uri: URI of the blob storage location
+            metadata: Optional metadata dictionary
+
+        Returns:
+            Dictionary with artefact details
+
+        Raises:
+            RuntimeError: If database operation fails
+        """
+        session = self.get_session()
+        try:
+            artefact = Artefact(
+                document_id=document_id,
+                artefact_type=artefact_type,
+                blob_uri=blob_uri,
+                artefact_metadata=metadata or {}
+            )
+            session.add(artefact)
+            session.commit()
+            session.refresh(artefact)
+            return {
+                "id": artefact.id,
+                "document_id": artefact.document_id,
+                "artefact_type": artefact.artefact_type,
+                "blob_uri": artefact.blob_uri,
+                "created_at": artefact.created_at.isoformat() if artefact.created_at else None
+            }
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Failed to create artefact record: {str(e)}"
+            raise RuntimeError(error_msg) from e
+        finally:
+            session.close()
+
+    def link_document_to_run(self, run_id: int, document_id: int):
+        """Link a document to a run by updating the run's document_id.
+
+        Args:
+            run_id: Run ID
+            document_id: Document ID to link
+
+        Raises:
+            RuntimeError: If database operation fails
+            ValueError: If run not found
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if not run:
+                raise ValueError(f"Run {run_id} not found")
+            run.document_id = document_id
+            session.commit()
+        except ValueError:
+            # Re-raise ValueError without rollback (no changes made)
+            raise
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Failed to link document {document_id} to run {run_id}: {str(e)}"
+            raise RuntimeError(error_msg) from e
+        finally:
+            session.close()
+
+    def update_run(
+        self,
+        run_id: int,
+        status: Optional[str] = None,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Update a run record.
+
+        Args:
+            run_id: Run ID to update
+            status: Optional status to set
+            error_message: Optional error message
+            metadata: Optional metadata to merge with existing
+
+        Raises:
+            RuntimeError: If database operation fails
+            ValueError: If run not found
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if not run:
+                raise ValueError(f"Run {run_id} not found")
+
+            if status:
+                run.status = status
+            if error_message:
+                run.error_message = error_message
+            if metadata:
+                # Merge with existing metadata
+                existing = run.run_metadata or {}
+                existing.update(metadata)
+                run.run_metadata = existing
+            run.completed_at = datetime.now(timezone.utc)
+            session.commit()
+        except ValueError:
+            # Re-raise ValueError without rollback (no changes made)
+            raise
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Failed to update run {run_id}: {str(e)}"
+            raise RuntimeError(error_msg) from e
+        finally:
+            session.close()
+
+    def get_resolved_fields_for_submission(self, submission_id: int) -> Dict[str, Any]:
+        """Get resolved fields cache for a submission."""
+        session = self.get_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if submission and submission.submission_metadata:
+                return submission.submission_metadata.get("resolved_fields", {})
+            return {}
+        finally:
+            session.close()
+
+    def get_resolved_fields_for_application(self, application_ref: str) -> Dict[str, Any]:
+        """
+        Get all resolved fields from previous submissions for a given application_ref.
+
+        This implements application-level caching: if a field was resolved in any
+        previous submission for this application, it won't be asked again.
+
+        Args:
+            application_ref: Application reference string
+
+        Returns:
+            Dictionary of resolved fields {field_name: value}
+        """
+        session = self.get_session()
+        try:
+            # Get planning case (application)
+            app = session.query(Application).filter(Application.application_ref == application_ref).first()
+            if not app:
+                return {}
+
+            # Query all submissions for this planning case
+            submissions = session.query(Submission).filter(
+                Submission.planning_case_id == app.id
+            ).order_by(Submission.created_at.desc()).all()
+
+            resolved_fields = {}
+            for submission in submissions:
+                if submission.submission_metadata:
+                    submission_resolved = submission.submission_metadata.get("resolved_fields", {})
+                    if submission_resolved:
+                        resolved_fields.update(submission_resolved)
+
+            return resolved_fields
+        finally:
+            session.close()
+
+    def update_submission_metadata(
+        self,
+        submission_id: int,
+        metadata_updates: Dict[str, Any]
+    ):
+        """
+        Update submission metadata by merging with existing metadata.
+
+        Args:
+            submission_id: Submission ID
+            metadata_updates: Dictionary of metadata fields to update/merge
+        """
+        session = self.get_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if submission:
+                # Merge with existing metadata
+                existing_metadata = submission.submission_metadata or {}
+                existing_metadata.update(metadata_updates)
+                submission.submission_metadata = existing_metadata
+                submission.updated_at = datetime.now(timezone.utc)
+                session.commit()
+        finally:
+            session.close()
+
+    def get_submission_by_version(
+        self,
+        planning_case_id: int,
+        submission_version: str
+    ) -> Optional[Submission]:
+        """Get a submission by planning case and version."""
+        session = self.get_session()
+        try:
+            return session.query(Submission).filter(
+                Submission.planning_case_id == planning_case_id,
+                Submission.submission_version == submission_version
+            ).first()
+        finally:
+            session.close()
+
+    def create_page(
+        self,
+        document_id: int,
+        page_number: int,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Page:
+        """Create a new page record."""
+        session = self.get_session()
+        try:
+            page = Page(
+                document_id=document_id,
+                page_number=page_number,
+                page_metadata=metadata or {}
+            )
+            session.add(page)
+            session.commit()
+            session.refresh(page)
+            return page
+        finally:
+            session.close()
+
+    def create_pages_bulk(
+        self,
+        pages: List[Page],
+        session: Optional[Session] = None
+    ) -> List[Page]:
+        """Create multiple page records in a single transaction."""
+        owns_session = session is None
+        if session is None:
+            session = self.get_session()
+        try:
+            session.add_all(pages)
+            session.commit()
+            for page in pages:
+                session.refresh(page)
+            return pages
+        finally:
+            if owns_session:
+                session.close()
+
+    def create_evidence(
+        self,
+        document_id: int,
+        page_number: int,
+        evidence_type: str,
+        evidence_key: str,
+        snippet: Optional[str] = None,
+        content: Optional[str] = None,
+        confidence: Optional[float] = None,
+        bbox: Optional[Dict[str, Any]] = None,
+        page_id: Optional[int] = None
+    ) -> Evidence:
+        """Create a new evidence record."""
+        session = self.get_session()
+        try:
+            evidence = Evidence(
+                document_id=document_id,
+                page_id=page_id,
+                page_number=page_number,
+                evidence_type=evidence_type,
+                evidence_key=evidence_key,
+                snippet=snippet,
+                content=content,
+                confidence=confidence,
+                bbox=bbox
+            )
+            session.add(evidence)
+            session.commit()
+            session.refresh(evidence)
+            return evidence
+        finally:
+            session.close()
+
+    def create_evidence_bulk(
+        self,
+        evidence_items: List[Evidence],
+        session: Optional[Session] = None
+    ) -> List[Evidence]:
+        """Create multiple evidence records in a single transaction."""
+        owns_session = session is None
+        if session is None:
+            session = self.get_session()
+        try:
+            session.add_all(evidence_items)
+            session.commit()
+            for evidence in evidence_items:
+                session.refresh(evidence)
+            return evidence_items
+        finally:
+            if owns_session:
+                session.close()
+
+    def create_extracted_field(
+        self,
+        submission_id: int,
+        field_name: str,
+        field_value: Optional[str] = None,
+        field_unit: Optional[str] = None,
+        confidence: Optional[float] = None,
+        extractor: Optional[str] = None,
+        evidence_id: Optional[int] = None
+    ) -> ExtractedField:
+        """Create a new extracted field record."""
+        session = self.get_session()
+        try:
+            field = ExtractedField(
+                submission_id=submission_id,
+                field_name=field_name,
+                field_value=field_value,
+                field_unit=field_unit,
+                confidence=confidence,
+                extractor=extractor,
+                evidence_id=evidence_id
+            )
+            session.add(field)
+            session.commit()
+            session.refresh(field)
+            return field
         finally:
             session.close()

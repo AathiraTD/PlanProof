@@ -9,6 +9,7 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
+slowapi==0.1.9  # Rate limiting for FastAPI
 
 pydantic==2.5.3
 pydantic-settings==2.1.0
@@ -73,7 +74,9 @@ requests==2.31.0
 # ----------------------------
 python-dotenv==1.0.0
 python-jose[cryptography]==3.3.0
+PyJWT==2.8.0
 python-dateutil==2.8.2
+click==8.1.7  # CLI tool framework
 
 # ----------------------------
 # Testing

@@ -5,8 +5,9 @@ Application Management Endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 
-from planproof.api.dependencies import get_db
+from planproof.api.dependencies import get_db, get_current_user
 from planproof.db import Database, Application, Submission
 
 router = APIRouter()
@@ -32,7 +33,8 @@ class ApplicationCreateRequest(BaseModel):
 async def list_applications(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ) -> List[ApplicationResponse]:
     """
     List all planning applications.
@@ -43,14 +45,19 @@ async def list_applications(
     """
     session = db.get_session()
     try:
-        apps = session.query(Application).offset(skip).limit(limit).all()
-        
+        # Fix N+1 query: Use a single query with join and group_by
+        apps_with_counts = session.query(
+            Application,
+            func.count(Submission.id).label('submission_count')
+        ).outerjoin(
+            Submission,
+            Submission.planning_case_id == Application.id
+        ).group_by(
+            Application.id
+        ).offset(skip).limit(limit).all()
+
         results = []
-        for app in apps:
-            submission_count = session.query(Submission).filter(
-                Submission.planning_case_id == app.id
-            ).count()
-            
+        for app, submission_count in apps_with_counts:
             results.append(ApplicationResponse(
                 id=app.id,
                 application_ref=app.application_ref,
@@ -59,7 +66,7 @@ async def list_applications(
                 updated_at=app.updated_at.isoformat() if app.updated_at else None,
                 submission_count=submission_count
             ))
-        
+
         return results
     finally:
         session.close()
@@ -68,7 +75,8 @@ async def list_applications(
 @router.get("/applications/{application_ref}")
 async def get_application(
     application_ref: str,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ):
     """
     Get application details by reference.
@@ -114,7 +122,8 @@ async def get_application(
 @router.post("/applications")
 async def create_application(
     request: ApplicationCreateRequest,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
 ):
     """
     Create a new planning application.

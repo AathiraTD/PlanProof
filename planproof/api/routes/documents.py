@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 from planproof.api.dependencies import (
-    get_db, get_storage_client, get_docintel_client, get_aoai_client
+    get_db, get_storage_client, get_docintel_client, get_aoai_client, get_current_user
 )
 from planproof.db import Database
 from planproof.storage import StorageClient
@@ -43,7 +43,8 @@ async def upload_document(
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
-    aoai: AzureOpenAIClient = Depends(get_aoai_client)
+    aoai: AzureOpenAIClient = Depends(get_aoai_client),
+    user: dict = Depends(get_current_user)
 ) -> DocumentUploadResponse:
     """
     Upload a PDF document for processing.
@@ -83,14 +84,15 @@ async def upload_document(
         "document_type": document_type,
         "source": "api"
     })
-    
+
+    # Save uploaded file to temp location
+    tmp_path = None
     try:
-        # Save uploaded file to temp location
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
+
         # Step 1: Ingest (upload to blob storage)
         ingested = ingest_pdf(
             tmp_path,
@@ -179,10 +181,7 @@ async def upload_document(
         
         # Update run status
         db.update_run(run["id"], status="completed")
-        
-        # Cleanup temp file
-        Path(tmp_path).unlink(missing_ok=True)
-        
+
         return DocumentUploadResponse(
             run_id=run["id"],
             document_id=ingested["document_id"],
@@ -192,12 +191,22 @@ async def upload_document(
             status="completed",
             message="Document processed successfully"
         )
-        
+
     except Exception as e:
         # Update run with error
         db.update_run(run["id"], status="failed", error_message=str(e))
-        
+
         raise HTTPException(
             status_code=500,
             detail=f"Document processing failed: {str(e)}"
         )
+
+    finally:
+        # Always cleanup temp file, even if processing failed
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception as cleanup_error:
+                # Log but don't fail the request due to cleanup error
+                import logging
+                logging.warning(f"Failed to cleanup temp file {tmp_path}: {cleanup_error}")

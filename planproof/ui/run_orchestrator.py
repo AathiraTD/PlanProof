@@ -4,6 +4,7 @@ Run orchestrator: Single entry point for UI to start, monitor, and retrieve runs
 
 import os
 import json
+import logging
 import traceback
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -21,8 +22,9 @@ from planproof.pipeline.validate import load_rule_catalog, validate_extraction
 from planproof.pipeline.llm_gate import should_trigger_llm, resolve_with_llm_new
 from planproof.config import get_settings
 
-# Initialize settings at module level
+# Initialize settings and logger at module level
 settings = get_settings()
+LOGGER = logging.getLogger(__name__)
 
 
 def _ensure_run_dirs(run_id: int) -> tuple:
@@ -241,7 +243,7 @@ def _process_run(
                 except Exception as llm_error:
                     # LLM gate error shouldn't stop processing - log and continue
                     error_details = traceback.format_exc()
-                    print(f"Warning: LLM gate error for doc {ingested['document_id']}: {llm_error}")
+                    LOGGER.warning(f"LLM gate error for doc {ingested['document_id']}: {llm_error}")
                     # Save error but don't fail the document
                     llm_error_file = outputs_dir / f"llm_gate_error_{ingested['document_id']}.txt"
                     with open(llm_error_file, "w", encoding="utf-8") as f:
@@ -280,7 +282,7 @@ def _process_run(
                     error_info["step"] = "llm_gate"
                 
                 errors.append(error_info)
-                print(f"ERROR processing {Path(file_path).name} at step '{error_info['step']}': {str(e)}")
+                LOGGER.error(f"ERROR processing {Path(file_path).name} at step '{error_info['step']}': {str(e)}")
                 
                 # Save error to outputs
                 inputs_dir, outputs_dir = _ensure_run_dirs(run_id)
@@ -320,9 +322,9 @@ def _process_run(
         try:
             with open(summary_file, "w", encoding="utf-8") as f:
                 json.dump(summary_data, f, indent=2, ensure_ascii=False)
-            print(f"Summary saved to {summary_file}")
+            LOGGER.info(f"Summary saved to {summary_file}")
         except Exception as summary_error:
-            print(f"Warning: Failed to save summary file: {summary_error}")
+            LOGGER.warning(f"Failed to save summary file: {summary_error}")
         
         try:
             db.update_run(
@@ -330,14 +332,32 @@ def _process_run(
                 status=final_status,
                 metadata=summary_data
             )
-            print(f"Run {run_id} status updated to {final_status}")
+            LOGGER.info(f"Run {run_id} status updated to {final_status}")
         except Exception as update_error:
             # If update fails, try one more time with just status
-            print(f"Warning: Failed to update run {run_id} status: {update_error}")
+            LOGGER.warning(f"Failed to update run {run_id} with full metadata: {update_error}")
+            error_traceback = traceback.format_exc()
             try:
+                # Try minimal update without metadata
                 db.update_run(run_id, status=final_status)
-            except:
-                pass
+                LOGGER.info(f"Run {run_id} status updated (minimal update)")
+            except Exception as retry_error:
+                # Critical: Log the error but don't crash the thread
+                LOGGER.critical(f"Failed to update run {run_id} status on retry: {retry_error}")
+                LOGGER.critical(f"Original error: {update_error}")
+                LOGGER.critical(f"Traceback:\n{error_traceback}")
+                # Save error to file for debugging
+                try:
+                    inputs_dir, outputs_dir = _ensure_run_dirs(run_id)
+                    error_file = outputs_dir / "critical_update_error.txt"
+                    with open(error_file, "w", encoding="utf-8") as f:
+                        f.write(f"Critical error updating run status:\n")
+                        f.write(f"Run ID: {run_id}\n")
+                        f.write(f"Original error: {update_error}\n")
+                        f.write(f"Retry error: {retry_error}\n\n")
+                        f.write(f"Traceback:\n{error_traceback}")
+                except Exception as file_error:
+                    LOGGER.error(f"Failed to save error file: {file_error}")
         
     except Exception as e:
         error_details = traceback.format_exc()
@@ -559,8 +579,22 @@ def get_run_results(run_id: int) -> Dict[str, Any]:
                     "error": error_content.split("\n")[0] if error_content else "Unknown error",
                     "traceback": error_content
                 })
-            except:
-                pass
+            except (IOError, OSError) as read_error:
+                # Log but don't fail if we can't read an error file
+                LOGGER.warning(f"Failed to read error file {error_file}: {read_error}")
+                errors.append({
+                    "filename": error_file.name,
+                    "error": f"Failed to read error file: {str(read_error)}",
+                    "traceback": None
+                })
+            except Exception as unexpected_error:
+                # Catch any other unexpected errors
+                LOGGER.error(f"Unexpected error reading error file {error_file}: {unexpected_error}")
+                errors.append({
+                    "filename": error_file.name,
+                    "error": f"Unexpected error reading file: {str(unexpected_error)}",
+                    "traceback": None
+                })
         
         # Build summary
         total_docs = len(validation_files)

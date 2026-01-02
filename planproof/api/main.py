@@ -2,18 +2,27 @@
 FastAPI REST API - Main Application
 
 Provides REST endpoints for BCC to integrate with PlanProof.
-For MVP: No authentication required (internal use only).
-For Production: Enable authentication in dependencies.py
+
+Authentication: All endpoints require authentication via JWT token or API key.
+- Configure API_KEYS environment variable for API key authentication
+- Configure JWT_SECRET_KEY environment variable for JWT token authentication
+- If neither is configured, authentication is bypassed (MVP mode only)
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from planproof.config import get_settings
 from .routes import applications, documents, validation, health
 
 settings = get_settings()
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -25,13 +34,23 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
-# CORS middleware (configure for production)
+# Add rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS middleware - restrict to configured origins
+# Configure allowed origins via API_CORS_ORIGINS environment variable
+# Format: comma-separated list, e.g., "http://localhost:3000,https://app.example.com"
+cors_origins = settings.api_cors_origins
+if isinstance(cors_origins, str):
+    cors_origins = [origin.strip() for origin in cors_origins.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 # Include routers
