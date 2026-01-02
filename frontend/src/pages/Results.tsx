@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
+import BNGDecision from '../components/BNGDecision';
 
 export default function Results() {
   const { applicationId, runId } = useParams<{ applicationId: string; runId: string }>();
@@ -307,6 +308,20 @@ export default function Results() {
           </Grid>
         </Grid>
       </Paper>
+
+      {/* BNG Decision Component */}
+      <BNGDecision
+        runId={parseInt(runId!)}
+        currentBNGStatus={{
+          applicable: results.extracted_fields?.bng_applicable === 'true'
+            ? true
+            : results.extracted_fields?.bng_applicable === 'false'
+            ? false
+            : null,
+          exemptionReason: results.extracted_fields?.bng_exemption_reason,
+        }}
+        onDecisionSubmitted={() => loadResults(true)}
+      />
 
       {/* Documents List */}
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>

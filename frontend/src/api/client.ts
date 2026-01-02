@@ -231,4 +231,13 @@ export const api = {
     });
     return response.data;
   },
+
+  // BNG Decision
+  submitBNGDecision: async (runId: number, bngApplicable: boolean, exemptionReason?: string) => {
+    const response = await apiClient.post(`/api/v1/runs/${runId}/bng-decision`, {
+      bng_applicable: bngApplicable,
+      exemption_reason: exemptionReason,
+    });
+    return response.data;
+  },
 };

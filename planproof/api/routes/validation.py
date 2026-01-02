@@ -603,3 +603,104 @@ async def compare_runs(
         }
     finally:
         session.close()
+
+
+class BNGDecisionRequest(BaseModel):
+    """Request to submit BNG applicability decision."""
+    bng_applicable: bool
+    exemption_reason: Optional[str] = None
+
+
+@router.post("/runs/{run_id}/bng-decision")
+async def submit_bng_decision(
+    run_id: int,
+    request: BNGDecisionRequest,
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Submit BNG (Biodiversity Net Gain) applicability decision for a run.
+    
+    **Path Parameters:**
+    - run_id: Run ID
+    
+    **Request Body:**
+    ```json
+    {
+        "bng_applicable": true,
+        "exemption_reason": "Householder application - BNG not required"
+    }
+    ```
+    """
+    from planproof.db import ExtractedField, Submission
+    
+    session = db.get_session()
+    try:
+        # Validate run exists
+        run = session.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        
+        # Get submission associated with this run
+        submission = None
+        if run.application_id:
+            from planproof.db import Application
+            app = session.query(Application).filter(Application.id == run.application_id).first()
+            if app and app.submissions:
+                submission = app.submissions[-1]  # Get latest submission
+        
+        if not submission:
+            raise HTTPException(status_code=400, detail="No submission found for this run")
+        
+        # Update or create bng_applicable field
+        bng_field = session.query(ExtractedField).filter(
+            ExtractedField.submission_id == submission.id,
+            ExtractedField.field_name == "bng_applicable"
+        ).first()
+        
+        if bng_field:
+            bng_field.field_value = str(request.bng_applicable).lower()
+            bng_field.confidence = 1.0
+            bng_field.extractor = "user"
+        else:
+            bng_field = ExtractedField(
+                submission_id=submission.id,
+                field_name="bng_applicable",
+                field_value=str(request.bng_applicable).lower(),
+                confidence=1.0,
+                extractor="user"
+            )
+            session.add(bng_field)
+        
+        # Update or create bng_exemption_reason if provided
+        if not request.bng_applicable and request.exemption_reason:
+            exemption_field = session.query(ExtractedField).filter(
+                ExtractedField.submission_id == submission.id,
+                ExtractedField.field_name == "bng_exemption_reason"
+            ).first()
+            
+            if exemption_field:
+                exemption_field.field_value = request.exemption_reason
+                exemption_field.confidence = 1.0
+                exemption_field.extractor = "user"
+            else:
+                exemption_field = ExtractedField(
+                    submission_id=submission.id,
+                    field_name="bng_exemption_reason",
+                    field_value=request.exemption_reason,
+                    confidence=1.0,
+                    extractor="user"
+                )
+                session.add(exemption_field)
+        
+        session.commit()
+        
+        return {
+            "run_id": run_id,
+            "submission_id": submission.id,
+            "bng_applicable": request.bng_applicable,
+            "exemption_reason": request.exemption_reason,
+            "message": "BNG decision recorded successfully"
+        }
+    finally:
+        session.close()
