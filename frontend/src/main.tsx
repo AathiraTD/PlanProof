@@ -7,14 +7,65 @@ import App from './App';
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#2563eb',
+      main: '#1d4ed8',
+      contrastText: '#ffffff',
     },
     secondary: {
-      main: '#7c3aed',
+      main: '#6d28d9',
+      contrastText: '#ffffff',
+    },
+    success: {
+      main: '#15803d',
+      contrastText: '#ffffff',
+    },
+    warning: {
+      main: '#b45309',
+      contrastText: '#ffffff',
+    },
+    error: {
+      main: '#b91c1c',
+      contrastText: '#ffffff',
+    },
+    info: {
+      main: '#0369a1',
+      contrastText: '#ffffff',
     },
   },
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+    h4: {
+      fontWeight: 600,
+    },
+    h5: {
+      fontWeight: 600,
+    },
+    h6: {
+      fontWeight: 600,
+    },
+  },
+  shape: {
+    borderRadius: 12,
+  },
+  components: {
+    MuiButton: {
+      defaultProps: {
+        disableElevation: true,
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+        },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: {
+          fontWeight: 500,
+        },
+      },
+    },
   },
 });
 

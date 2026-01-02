@@ -41,8 +41,9 @@ import {
   HourglassEmpty,
   RateReview,
   CompareArrows,
+  Description,
 } from '@mui/icons-material';
-import api from '../api/client';
+import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 
 interface ValidationSummary {
@@ -121,6 +122,7 @@ const ApplicationDetails: React.FC = () => {
   const [comparison, setComparison] = useState<RunComparison | null>(null);
   const [runPage, setRunPage] = useState(0);
   const [runsPerPage, setRunsPerPage] = useState(5);
+  const [downloadingReportRunId, setDownloadingReportRunId] = useState<number | null>(null);
   const prefetchedRunsRef = useRef(new Set<number>());
 
   useEffect(() => {
@@ -209,6 +211,23 @@ const ApplicationDetails: React.FC = () => {
     } catch (err) {
       prefetchedRunsRef.current.delete(runId);
       console.warn('Failed to prefetch run results:', err);
+    }
+  };
+
+  const handleDownloadReport = async (runId: number) => {
+    try {
+      setDownloadingReportRunId(runId);
+      const blob = await api.downloadReviewReport(runId);
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `run-${runId}-hil-review-report.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(getApiErrorMessage(err, 'Failed to download report'));
+    } finally {
+      setDownloadingReportRunId(null);
     }
   };
 
@@ -698,6 +717,17 @@ const ApplicationDetails: React.FC = () => {
                         >
                           View Results
                         </Button>
+                        {run.status === 'reviewed' && (
+                          <Button
+                            size="small"
+                            variant="contained"
+                            startIcon={<Description />}
+                            onClick={() => handleDownloadReport(run.id)}
+                            disabled={downloadingReportRunId === run.id}
+                          >
+                            {downloadingReportRunId === run.id ? 'Preparing...' : 'Download report'}
+                          </Button>
+                        )}
                         {run.status === 'completed' && run.validation_summary.needs_review > 0 && (
                           <Button
                             size="small"
