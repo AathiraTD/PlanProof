@@ -2,21 +2,23 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
-  Card,
-  CardContent,
   Typography,
   Grid,
   Chip,
   Alert,
   CircularProgress,
   Button,
-  Divider,
   Stack,
   List,
   ListItem,
   ListItemText,
   Paper,
   Container,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   RateReview,
@@ -26,12 +28,12 @@ import {
   Warning,
   Info,
   CheckCircle,
+  ExpandMore,
+  FindInPage,
+  ThumbUp,
+  ThumbDown,
 } from '@mui/icons-material';
 import { api } from '../api/client';
-
-interface FindingsByDocument {
-  [documentName: string]: any[];
-}
 
 export default function Results() {
   const { applicationId, runId } = useParams<{ applicationId: string; runId: string }>();
@@ -269,8 +271,114 @@ export default function Results() {
                 <Typography variant="body1" gutterBottom>
                   {finding.message}
                 </Typography>
+                
+                {/* Evidence Details */}
+                {finding.evidence_details && finding.evidence_details.length > 0 && (
+                  <Accordion sx={{ mt: 2, backgroundColor: 'rgba(255,255,255,0.7)' }}>
+                    <AccordionSummary expandIcon={<ExpandMore />}>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <FindInPage />
+                        <Typography variant="subtitle2">
+                          Evidence ({finding.evidence_details.length} items)
+                        </Typography>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1}>
+                        {finding.evidence_details.map((evidence: any, evIndex: number) => (
+                          <Box
+                            key={evIndex}
+                            sx={{
+                              p: 1.5,
+                              backgroundColor: 'grey.50',
+                              borderRadius: 1,
+                              border: '1px solid',
+                              borderColor: 'grey.300',
+                            }}
+                          >
+                            <Typography variant="caption" color="text.secondary">
+                              Page {evidence.page} {evidence.evidence_key && `• ${evidence.evidence_key}`}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mt: 0.5, fontFamily: 'monospace' }}>
+                              "{evidence.snippet}"
+                            </Typography>
+                            {evidence.confidence && (
+                              <Chip
+                                label={`Confidence: ${(evidence.confidence * 100).toFixed(0)}%`}
+                                size="small"
+                                sx={{ mt: 1 }}
+                              />
+                            )}
+                          </Box>
+                        ))}
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+
+                {/* Candidate Documents */}
+                {finding.candidate_documents && finding.candidate_documents.length > 0 && (
+                  <Accordion sx={{ mt: 1, backgroundColor: 'rgba(255,255,255,0.7)' }}>
+                    <AccordionSummary expandIcon={<ExpandMore />}>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Description />
+                        <Typography variant="subtitle2">
+                          Scanned Documents ({finding.candidate_documents.length})
+                        </Typography>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1}>
+                        {finding.candidate_documents.map((doc: any, docIndex: number) => (
+                          <Box
+                            key={docIndex}
+                            sx={{
+                              p: 1.5,
+                              backgroundColor: doc.scanned ? 'success.lighter' : 'grey.100',
+                              borderRadius: 1,
+                              border: '1px solid',
+                              borderColor: doc.scanned ? 'success.main' : 'grey.300',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Box>
+                              <Typography variant="body2" fontWeight="medium">
+                                {doc.document_name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {doc.reason}
+                              </Typography>
+                              {doc.confidence && (
+                                <Chip
+                                  label={`${(doc.confidence * 100).toFixed(0)}%`}
+                                  size="small"
+                                  sx={{ ml: 1 }}
+                                />
+                              )}
+                            </Box>
+                            <Box>
+                              <Tooltip title="Confirm correct document">
+                                <IconButton size="small" color="success">
+                                  <ThumbUp fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Mark as incorrect">
+                                <IconButton size="small" color="error">
+                                  <ThumbDown fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Box>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+
                 {finding.details && (
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                     {JSON.stringify(finding.details, null, 2)}
                   </Typography>
                 )}
@@ -310,6 +418,55 @@ export default function Results() {
                 <Typography variant="body1" gutterBottom>
                   {finding.message}
                 </Typography>
+                
+                {/* Evidence Details */}
+                {finding.evidence_details && finding.evidence_details.length > 0 && (
+                  <Accordion sx={{ mt: 2, backgroundColor: 'rgba(255,255,255,0.7)' }}>
+                    <AccordionSummary expandIcon={<ExpandMore />}>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <FindInPage />
+                        <Typography variant="subtitle2">
+                          Evidence ({finding.evidence_details.length} items)
+                        </Typography>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1}>
+                        {finding.evidence_details.map((evidence: any, evIndex: number) => (
+                          <Box key={evIndex} sx={{ p: 1.5, backgroundColor: 'grey.50', borderRadius: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Page {evidence.page}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mt: 0.5 }}>
+                              "{evidence.snippet}"
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+
+                {/* Candidate Documents */}
+                {finding.candidate_documents && finding.candidate_documents.length > 0 && (
+                  <Accordion sx={{ mt: 1, backgroundColor: 'rgba(255,255,255,0.7)' }}>
+                    <AccordionSummary expandIcon={<ExpandMore />}>
+                      <Typography variant="subtitle2">
+                        Scanned Documents ({finding.candidate_documents.length})
+                      </Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1}>
+                        {finding.candidate_documents.map((doc: any, docIndex: number) => (
+                          <Box key={docIndex} sx={{ p: 1.5, backgroundColor: 'grey.100', borderRadius: 1 }}>
+                            <Typography variant="body2">{doc.document_name}</Typography>
+                            <Typography variant="caption" color="text.secondary">{doc.reason}</Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
               </Box>
             ))}
           </Stack>

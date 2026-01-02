@@ -31,6 +31,8 @@ class ValidationFinding(BaseModel):
     severity: str
     message: Optional[str]
     evidence: Optional[List[Dict[str, Any]]]
+    evidence_details: Optional[List[Dict[str, Any]]] = None  # [{"page": 1, "snippet": "...", "evidence_key": "..."}]
+    candidate_documents: Optional[List[Dict[str, Any]]] = None  # [{"document_id": 1, "document_name": "...", "confidence": 0.8}]
 
 
 class ValidationResults(BaseModel):
@@ -292,6 +294,23 @@ async def get_run_results(
             if check.rule and check.rule.severity:
                 severity = check.rule.severity
             
+            # Fetch detailed evidence from Evidence table if evidence_ids exist
+            evidence_list = []
+            if check.evidence_ids:
+                from planproof.db import Evidence
+                evidences = session.query(Evidence).filter(
+                    Evidence.id.in_(check.evidence_ids)
+                ).all()
+                for ev in evidences:
+                    evidence_list.append({
+                        "id": ev.id,
+                        "page": ev.page_number,
+                        "snippet": ev.snippet[:200] if ev.snippet else "",
+                        "evidence_key": ev.evidence_key,
+                        "confidence": ev.confidence,
+                        "bbox": ev.bbox
+                    })
+            
             findings.append({
                 "id": check.id,
                 "rule_id": check.rule_id_string or str(check.rule_id),
@@ -300,6 +319,8 @@ async def get_run_results(
                 "severity": severity or "info",
                 "message": check.explanation or "",
                 "evidence": check.evidence_ids or [],
+                "evidence_details": check.evidence_details or evidence_list,
+                "candidate_documents": check.candidate_documents or [],
                 "details": check.rule.rule_config if check.rule and check.rule.rule_config else None,
                 "document_name": document_lookup.get(check.document_id).filename if check.document_id in document_lookup else None
             })
