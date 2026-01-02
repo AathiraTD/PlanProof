@@ -37,6 +37,9 @@ import {
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 import BNGDecision from '../components/BNGDecision';
+import DocumentViewer from '../components/DocumentViewer';
+import LLMTransparency from '../components/LLMTransparency';
+import PriorApprovalDocs from '../components/PriorApprovalDocs';
 
 export default function Results() {
   const { applicationId, runId } = useParams<{ applicationId: string; runId: string }>();
@@ -48,6 +51,9 @@ export default function Results() {
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [reclassifying, setReclassifying] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<any>(null);
 
   const loadResults = async (isBackground = false) => {
     if (!runId) return;
@@ -323,6 +329,17 @@ export default function Results() {
         onDecisionSubmitted={() => loadResults(true)}
       />
 
+      {/* Prior Approval Documents - Show if any PA rules are in findings */}
+      {findings.some((f: any) => f.rule_id?.startsWith('PA-')) && results.submission_id && (
+        <Box sx={{ mb: 3 }}>
+          <PriorApprovalDocs
+            runId={parseInt(runId!)}
+            submissionId={results.submission_id}
+            onUpdate={() => loadResults(true)}
+          />
+        </Box>
+      )}
+
       {/* Documents List */}
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
@@ -424,12 +441,27 @@ export default function Results() {
                         {finding.evidence_details.map((evidence: any, evIndex: number) => (
                           <Box
                             key={evIndex}
+                            onClick={() => {
+                              setSelectedDocument({
+                                id: evidence.document_id,
+                                name: evidence.document_name || `Document ${evidence.document_id}`,
+                              });
+                              setSelectedEvidence(evidence);
+                              setViewerOpen(true);
+                            }}
                             sx={{
                               p: 1.5,
                               backgroundColor: 'grey.50',
                               borderRadius: 1,
                               border: '1px solid',
                               borderColor: 'grey.300',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              '&:hover': {
+                                backgroundColor: 'primary.50',
+                                borderColor: 'primary.main',
+                                transform: 'translateX(4px)',
+                              },
                             }}
                           >
                             <Typography variant="caption" color="text.secondary">
@@ -438,13 +470,21 @@ export default function Results() {
                             <Typography variant="body2" sx={{ mt: 0.5, fontFamily: 'monospace' }}>
                               "{evidence.snippet}"
                             </Typography>
-                            {evidence.confidence && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                              {evidence.confidence && (
+                                <Chip
+                                  label={`Confidence: ${(evidence.confidence * 100).toFixed(0)}%`}
+                                  size="small"
+                                />
+                              )}
                               <Chip
-                                label={`Confidence: ${(evidence.confidence * 100).toFixed(0)}%`}
+                                icon={<FindInPage />}
+                                label="View in document"
                                 size="small"
-                                sx={{ mt: 1 }}
+                                color="primary"
+                                variant="outlined"
                               />
-                            )}
+                            </Box>
                           </Box>
                         ))}
                       </Stack>
@@ -759,6 +799,28 @@ export default function Results() {
           ✅ No issues found - all validation checks passed!
         </Alert>
       )}
+
+      {/* LLM Transparency Section */}
+      {runId && (
+        <Box sx={{ mt: 3 }}>
+          <LLMTransparency runId={parseInt(runId)} />
+        </Box>
+      )}
+
+      {/* Document Viewer Dialog */}
+      <DocumentViewer
+        open={viewerOpen}
+        onClose={() => {
+          setViewerOpen(false);
+          setSelectedDocument(null);
+          setSelectedEvidence(null);
+        }}
+        documentId={selectedDocument?.id}
+        documentName={selectedDocument?.name}
+        initialPage={selectedEvidence?.page}
+        evidence={selectedEvidence}
+        runId={runId ? parseInt(runId) : undefined}
+      />
     </Container>
   );
 }
