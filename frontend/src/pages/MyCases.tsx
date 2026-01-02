@@ -140,9 +140,14 @@ export default function MyCases() {
                       <Typography variant="h6" gutterBottom>
                         {caseItem.application_ref}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                      <Typography variant="body2" color="text.secondary" gutterBottom">
                         👤 {caseItem.applicant_name || 'Unknown'}
                       </Typography>
+                      {caseItem.run_count > 0 && (
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          📊 {caseItem.run_count} run{caseItem.run_count !== 1 ? 's' : ''} processed
+                        </Typography>
+                      )}
                       <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                         <Chip
                           label={caseItem.status || 'Unknown'}
@@ -165,7 +170,8 @@ export default function MyCases() {
                     <Button
                       variant="outlined"
                       startIcon={<Visibility />}
-                      onClick={() => navigate(`/results/${caseItem.run_id || ''}`)}
+                      onClick={() => navigate(`/results/${caseItem.latest_run_id || ''}`)}
+                      disabled={!caseItem.latest_run_id}
                     >
                       View Details
                     </Button>

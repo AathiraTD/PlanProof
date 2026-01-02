@@ -156,6 +156,28 @@ export default function Results() {
         </Grid>
       </Grid>
 
+      {/* Extracted Fields Section */}
+      {results.extracted_fields && Object.keys(results.extracted_fields).length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Extracted Fields
+            </Typography>
+            <Box sx={{ pl: 2 }}>
+              <pre style={{ 
+                backgroundColor: '#f5f5f5', 
+                padding: '16px', 
+                borderRadius: '4px',
+                overflow: 'auto',
+                fontSize: '0.875rem'
+              }}>
+                {JSON.stringify(results.extracted_fields, null, 2)}
+              </pre>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Validation Findings */}
       <Card>
         <CardContent>
