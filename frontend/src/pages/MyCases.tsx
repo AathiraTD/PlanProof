@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import { Visibility, Refresh } from '@mui/icons-material';
 import { api } from '../api/client';
+import { getApiErrorMessage } from '../api/errorUtils';
 
 export default function MyCases() {
   const navigate = useNavigate();
@@ -47,7 +48,7 @@ export default function MyCases() {
       setCases((prev) => (replace ? incomingCases : [...prev, ...incomingCases]));
       setHasMore(incomingCases.length === pageSize);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load cases');
+      setError(getApiErrorMessage(err, 'Failed to load cases'));
     } finally {
       setLoading(false);
       setLoadingMore(false);

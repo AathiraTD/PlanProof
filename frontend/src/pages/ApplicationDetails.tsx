@@ -43,6 +43,7 @@ import {
   CompareArrows,
 } from '@mui/icons-material';
 import api from '../api/client';
+import { getApiErrorMessage } from '../api/errorUtils';
 
 interface ValidationSummary {
   pass: number;
@@ -151,7 +152,7 @@ const ApplicationDetails: React.FC = () => {
       setAppData(response);
     } catch (err: any) {
       console.error('Failed to load application details:', err);
-      setError(err.message || 'Failed to load application details');
+      setError(getApiErrorMessage(err, 'Failed to load application details'));
     } finally {
       setLoading(false);
     }
@@ -234,7 +235,7 @@ const ApplicationDetails: React.FC = () => {
       setComparison(response);
     } catch (err: any) {
       console.error('Failed to compare runs:', err);
-      setCompareError(err.response?.data?.detail || err.message || 'Failed to compare runs');
+      setCompareError(getApiErrorMessage(err, 'Failed to compare runs'));
     } finally {
       setCompareLoading(false);
     }

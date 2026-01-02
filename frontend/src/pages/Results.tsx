@@ -35,6 +35,7 @@ import {
   ThumbDown,
 } from '@mui/icons-material';
 import { api } from '../api/client';
+import { getApiErrorMessage } from '../api/errorUtils';
 
 export default function Results() {
   const { applicationId, runId } = useParams<{ applicationId: string; runId: string }>();
@@ -58,7 +59,7 @@ export default function Results() {
       setResults(data);
       sessionStorage.setItem(`run-results-${runId}`, JSON.stringify(data));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load results');
+      setError(getApiErrorMessage(err, 'Failed to load results'));
     } finally {
       if (isBackground) {
         setRefreshing(false);
@@ -119,7 +120,7 @@ export default function Results() {
     );
   }
 
-  if (error) {
+  if (error && !results) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4 }}>
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -162,6 +163,11 @@ export default function Results() {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+      {error && results && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
       {/* Header */}
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
