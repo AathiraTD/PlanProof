@@ -409,20 +409,37 @@ export default function Results() {
       {/* Extracted Fields */}
       {results.extracted_fields && Object.keys(results.extracted_fields).length > 0 && (
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Extracted Fields
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <FindInPage />
+            Extracted Fields ({Object.keys(results.extracted_fields).length})
           </Typography>
-          <Box sx={{ pl: 2 }}>
-            <pre style={{ 
-              backgroundColor: '#f5f5f5', 
-              padding: '16px', 
-              borderRadius: '4px',
-              overflow: 'auto',
-              fontSize: '0.875rem'
-            }}>
-              {JSON.stringify(results.extracted_fields, null, 2)}
-            </pre>
-          </Box>
+          <Grid container spacing={2}>
+            {Object.entries(results.extracted_fields).map(([fieldName, fieldData]: [string, any]) => (
+              <Grid item xs={12} sm={6} md={4} key={fieldName}>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 'bold' }}>
+                    {fieldName.replace(/_/g, ' ')}
+                  </Typography>
+                  <Typography variant="body1" sx={{ mt: 0.5, wordBreak: 'break-word' }}>
+                    {fieldData.value || 'N/A'}
+                  </Typography>
+                  {fieldData.confidence && (
+                    <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Confidence:
+                      </Typography>
+                      <Chip
+                        label={`${(fieldData.confidence * 100).toFixed(0)}%`}
+                        size="small"
+                        color={fieldData.confidence >= 0.8 ? 'success' : fieldData.confidence >= 0.5 ? 'warning' : 'default'}
+                        sx={{ height: '20px', fontSize: '0.7rem' }}
+                      />
+                    </Box>
+                  )}
+                </Paper>
+              </Grid>
+            ))}
+          </Grid>
         </Paper>
       )}
 
