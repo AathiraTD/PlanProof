@@ -20,7 +20,6 @@ import {
   Error,
   Save,
 } from '@mui/icons-material';
-import { api } from '../api/client';
 
 interface PriorApprovalDocsProps {
   runId: number;
@@ -61,7 +60,7 @@ const PriorApprovalDocs: React.FC<PriorApprovalDocsProps> = ({ runId, submission
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [presentDocs, setPresentDocs] = useState<Set<string>>(new Set());
-  const [customRequirements, setCustomRequirements] = useState<string[]>([]);
+  const [_customRequirements, _setCustomRequirements] = useState<string[]>([]);
 
   useEffect(() => {
     loadDocumentRequirements();

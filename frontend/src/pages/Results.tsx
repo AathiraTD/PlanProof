@@ -190,9 +190,12 @@ export default function Results() {
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box>
-            <Typography variant="h4" gutterBottom>
-              📋 Run Results
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Assignment sx={{ fontSize: 32, color: 'primary.main' }} />
+              <Typography variant="h4">
+                Run Results
+              </Typography>
+            </Box>
             <Typography variant="body2" color="text.secondary">
               Run ID: #{runId}
             </Typography>
@@ -319,9 +322,9 @@ export default function Results() {
       {/* Extracted Fields - NEW UX */}
       {results.extracted_fields && Object.keys(results.extracted_fields).length > 0 && (
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
             <FindInPage />
-            Extracted Fields ({Object.keys(results.extracted_fields).length})
+            Extracted Fields ({results.extracted_fields.length})
           </Typography>
           <ExtractedFieldsDisplay extractedFields={results.extracted_fields} />
         </Paper>

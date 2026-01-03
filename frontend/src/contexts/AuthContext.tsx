@@ -63,6 +63,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loadUser();
   }, []);
 
+  // Auto-refresh token before it expires (every 23 hours)
+  useEffect(() => {
+    if (!user) return;
+
+    const refreshToken = async () => {
+      try {
+        const response = await api.refreshToken();
+        localStorage.setItem('token', response.access_token);
+      } catch (err) {
+        console.error('Failed to refresh token:', err);
+        logout();
+      }
+    };
+
+    // Refresh token every 23 hours (1 hour before expiration)
+    const intervalId = setInterval(refreshToken, 23 * 60 * 60 * 1000);
+
+    return () => clearInterval(intervalId);
+  }, [user]);
+
   const login = async (username: string, password: string) => {
     const response = await api.login(username, password);
     

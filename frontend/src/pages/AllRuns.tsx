@@ -17,7 +17,7 @@ import {
   Button,
   Stack,
 } from '@mui/material';
-import { Refresh } from '@mui/icons-material';
+import { Refresh, PlaylistAddCheck } from '@mui/icons-material';
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 import type { Run } from '../types';
@@ -35,8 +35,7 @@ export default function AllRuns() {
     setError('');
     try {
       const data = await api.getRuns(1, 50, statusFilter === 'all' ? undefined : statusFilter);
-      // API returns direct array, not wrapped object
-      setRuns(Array.isArray(data) ? data : (data.runs || []));
+      setRuns(data);
     } catch (err: any) {
       setError(getApiErrorMessage(err, 'Failed to load runs'));
     } finally {
@@ -64,9 +63,12 @@ export default function AllRuns() {
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold">
-          🔍 All Validation Runs
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <PlaylistAddCheck sx={{ fontSize: 32, color: 'primary.main' }} />
+          <Typography variant="h4" fontWeight="bold">
+            All Validation Runs
+          </Typography>
+        </Box>
         <Button startIcon={<Refresh />} onClick={loadRuns}>
           Refresh
         </Button>
