@@ -9,7 +9,7 @@ import json
 
 import psycopg
 from psycopg.rows import dict_row
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, Float, ForeignKey, Boolean, Enum as SQLEnum
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, Float, ForeignKey, Boolean, Enum as SQLEnum, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from geoalchemy2 import Geometry
@@ -930,6 +930,92 @@ class Database:
         session = self.get_session()
         try:
             return session.query(Application).filter(Application.id == application_id).first()
+        finally:
+            session.close()
+
+    def find_applications_by_address(
+        self, 
+        site_address: str, 
+        exclude_application_id: Optional[int] = None
+    ) -> List[Application]:
+        """
+        Find applications with matching site address.
+        
+        Uses fuzzy matching (ILIKE) to handle slight format variations.
+        
+        Args:
+            site_address: Site address to search for
+            exclude_application_id: Optional application ID to exclude from results
+            
+        Returns:
+            List of matching applications, ordered by most recent first
+        """
+        if not site_address:
+            return []
+            
+        session = self.get_session()
+        try:
+            # Clean address for comparison
+            cleaned_address = site_address.strip().lower()
+            
+            # Build query with fuzzy matching
+            query = session.query(Application).filter(
+                Application.site_address.isnot(None),
+                Application.site_address.ilike(f"%{cleaned_address}%")
+            )
+            
+            # Exclude current application if specified
+            if exclude_application_id:
+                query = query.filter(Application.id != exclude_application_id)
+            
+            # Order by most recent first
+            applications = query.order_by(Application.created_at.desc()).limit(10).all()
+            
+            return applications
+        finally:
+            session.close()
+
+    def find_applications_by_postcode(
+        self,
+        postcode: str,
+        exclude_application_id: Optional[int] = None
+    ) -> List[Application]:
+        """
+        Find applications with matching postcode.
+        
+        Searches in both Application.postcode and extracted fields.
+        
+        Args:
+            postcode: UK postcode to search for
+            exclude_application_id: Optional application ID to exclude
+            
+        Returns:
+            List of matching applications, ordered by most recent first
+        """
+        if not postcode:
+            return []
+            
+        session = self.get_session()
+        try:
+            # Clean postcode (remove spaces)
+            cleaned_postcode = postcode.replace(" ", "").upper()
+            
+            # Search in Application table
+            query = session.query(Application).filter(
+                Application.postcode.isnot(None),
+                func.replace(func.upper(Application.postcode), " ", "") == cleaned_postcode
+            )
+            
+            if exclude_application_id:
+                query = query.filter(Application.id != exclude_application_id)
+            
+            applications = query.order_by(Application.created_at.desc()).limit(10).all()
+            
+            # TODO: Also search in ExtractedField table for postcode field
+            # if not applications:
+            #     subquery for extracted_fields...
+            
+            return applications
         finally:
             session.close()
 
