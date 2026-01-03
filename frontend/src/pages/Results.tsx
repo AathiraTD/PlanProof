@@ -5,6 +5,7 @@ import {
   Typography,
   Grid,
   Alert,
+  AlertTitle,
   Button,
   Stack,
   List,
@@ -14,6 +15,7 @@ import {
   Container,
   Skeleton,
   LinearProgress,
+  Chip,
 } from '@mui/material';
 import {
   RateReview,
@@ -43,10 +45,12 @@ export default function Results() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<any>(null);
+  const [runStatus, setRunStatus] = useState<string>('');
+  const [processingProgress, setProcessingProgress] = useState<number>(0);
 
   const loadResults = async (isBackground = false) => {
     if (!runId) return;
-    
+
     if (isBackground) {
       setRefreshing(true);
     } else {
@@ -56,6 +60,7 @@ export default function Results() {
     try {
       const data = await api.getRunResults(parseInt(runId));
       setResults(data);
+      setRunStatus(data.status || 'completed');
       sessionStorage.setItem(`run-results-${runId}`, JSON.stringify(data));
     } catch (err: any) {
       setError(getApiErrorMessage(err, 'Failed to load results'));
@@ -73,7 +78,9 @@ export default function Results() {
     const cachedResults = sessionStorage.getItem(`run-results-${runId}`);
     if (cachedResults) {
       try {
-        setResults(JSON.parse(cachedResults));
+        const parsed = JSON.parse(cachedResults);
+        setResults(parsed);
+        setRunStatus(parsed.status || 'completed');
         setLoading(false);
       } catch (err) {
         console.warn('Failed to parse cached run results:', err);
@@ -81,6 +88,32 @@ export default function Results() {
     }
     loadResults(Boolean(cachedResults));
   }, [runId]);
+
+  // Auto-refresh when processing
+  useEffect(() => {
+    if (!runId || !runStatus) return;
+
+    const isProcessing = ['pending', 'running'].includes(runStatus);
+    if (!isProcessing) return;
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setProcessingProgress(prev => {
+        if (prev >= 90) return 90; // Cap at 90% until actually complete
+        return prev + Math.random() * 10;
+      });
+    }, 2000);
+
+    // Poll for status updates
+    const pollInterval = setInterval(() => {
+      loadResults(true);
+    }, 5000); // Check every 5 seconds
+
+    return () => {
+      clearInterval(progressInterval);
+      clearInterval(pollInterval);
+    };
+  }, [runId, runStatus]);
 
   if (loading) {
     return (
@@ -140,6 +173,7 @@ export default function Results() {
 
   const summary = results.summary || {};
   const findings = results.findings || [];
+  const isProcessing = ['pending', 'running'].includes(runStatus);
 
   // Group findings by severity for stats display
   const criticalFindings = findings.filter((f: any) =>
@@ -175,7 +209,28 @@ export default function Results() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+      {/* Processing Status Banner */}
+      {isProcessing && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <AlertTitle>Processing Documents...</AlertTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {runStatus === 'pending' ? 'Waiting to start processing...' : 'Extracting text and validating documents...'}
+              </Typography>
+              <LinearProgress variant="determinate" value={processingProgress} />
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              {Math.round(processingProgress)}%
+            </Typography>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            This page will automatically refresh when processing is complete.
+          </Typography>
+        </Alert>
+      )}
+
+      {refreshing && !isProcessing && <LinearProgress sx={{ mb: 2 }} />}
       {error && results && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {error}
@@ -198,7 +253,7 @@ export default function Results() {
               </Typography>
             </Box>
             <Typography variant="body2" color="text.secondary">
-              Run ID: #{runId}
+              Run ID: #{runId} | Status: <Chip label={runStatus} size="small" color={isProcessing ? 'warning' : 'success'} />
             </Typography>
           </Box>
           <Stack direction="row" spacing={2}>
@@ -332,8 +387,10 @@ export default function Results() {
       )}
 
       {/* Validation Findings - NEW UX (Replaces all old findings sections) */}
-      <ValidationFindingsDisplay 
+      <ValidationFindingsDisplay
         findings={findings}
+        runId={runId ? parseInt(runId) : undefined}
+        applicationId={applicationId ? parseInt(applicationId) : undefined}
         onViewDocument={(documentId, evidenceDetails) => {
           setSelectedDocument({
             id: documentId,
