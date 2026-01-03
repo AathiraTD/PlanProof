@@ -10,6 +10,7 @@ Required variables must be set or the application will fail to start.
 """
 
 import os
+import json
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
@@ -83,6 +84,18 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     jwt_expiration_minutes: int = Field(default=60, alias="JWT_EXPIRATION_MINUTES")
     officer_roles: list[str] = Field(default=["officer", "admin"], alias="OFFICER_ROLES")
+
+    @field_validator("api_cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v) -> list[str]:
+        """Parse CORS origins from JSON string or return list as-is."""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # Fall back to comma-separated parsing
+                return [origin.strip() for origin in v.split(",")]
+        return v
 
     @field_validator("log_level")
     @classmethod

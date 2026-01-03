@@ -384,11 +384,8 @@ async def get_run_results(
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
         
-        if run.status not in ["completed", "reviewed"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Run is not completed yet. Status: {run.status}"
-            )
+        # Allow viewing results of any run status (completed, failed, running, etc.)
+        # This helps users debug failed runs and monitor in-progress runs
         
         documents = list(run.documents) if run.documents else []
         if not documents and run.document_id:
@@ -626,8 +623,8 @@ async def compare_runs(
         if not run_a or not run_b:
             raise HTTPException(status_code=404, detail="One or both runs not found")
 
-        if run_a.status != "completed" or run_b.status != "completed":
-            raise HTTPException(status_code=400, detail="Both runs must be completed to compare")
+        # Allow comparing runs regardless of status (completed, failed, etc.)
+        # Users may want to compare failed runs to diagnose issues
 
         if run_a.application_id and run_b.application_id and run_a.application_id != run_b.application_id:
             raise HTTPException(status_code=400, detail="Runs must belong to the same application")

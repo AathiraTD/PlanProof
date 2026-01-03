@@ -2,8 +2,8 @@ services:
   # Backend API (FastAPI)
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
     container_name: planproof-backend
     environment:
       # Use Azure PostgreSQL from .env
@@ -38,9 +38,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./runs:/app/runs
-      - ./artefacts:/app/artefacts
-      - ./data:/app/data
+      - ../../runs:/app/runs
+      - ../../artifacts:/app/artifacts
+      - ../../data:/app/data
     networks:
       - planproof-network
     restart: unless-stopped
@@ -54,7 +54,7 @@ services:
   # Frontend (React + Vite + Nginx)
   frontend:
     build:
-      context: ./frontend
+      context: ../../frontend
       dockerfile: Dockerfile
     container_name: planproof-frontend
     ports:
