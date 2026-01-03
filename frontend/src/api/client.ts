@@ -37,12 +37,13 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      // Only redirect to login if auth is actually configured
       const hasToken = localStorage.getItem('token');
       if (hasToken) {
         localStorage.removeItem('token');
-        // Note: Login page doesn't exist yet, so just clear token for now
-        console.warn('Authentication failed - token cleared');
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/login') {
+          window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        }
       }
     }
 

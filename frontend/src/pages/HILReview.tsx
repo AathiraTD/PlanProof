@@ -11,7 +11,6 @@ import {
   List,
   ListItem,
   ListItemButton,
-  ListItemText,
   Chip,
   TextField,
   CircularProgress,
@@ -31,7 +30,6 @@ import {
   ArrowBack,
   NavigateNext,
   NavigateBefore,
-  Close,
   Save,
 } from '@mui/icons-material';
 import { api } from '../api/client';
@@ -383,7 +381,7 @@ const HILReview: React.FC = () => {
             startIcon={<Save />}
             onClick={() => setShowCompleteDialog(true)}
             disabled={reviewStatus?.pending_count !== 0 || !hasReviewPermission}
-            aria-label={reviewStatus?.pending_count !== 0 ? `Complete review disabled - ${reviewStatus.pending_count} findings still pending` : 'Complete review'}
+            aria-label={reviewStatus?.pending_count !== 0 ? `Complete review disabled - ${reviewStatus?.pending_count} findings still pending` : 'Complete review'}
           >
             Complete Review
           </Button>

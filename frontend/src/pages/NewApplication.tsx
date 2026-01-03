@@ -54,7 +54,7 @@ export default function NewApplication() {
   const [fileProgress, setFileProgress] = useState<Map<string, FileProgress>>(new Map());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [lastRunId, setLastRunId] = useState<number | null>(null);
+  const [_lastRunId, setLastRunId] = useState<number | null>(null);
   const [createdApplicationId, setCreatedApplicationId] = useState<number | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
@@ -63,7 +63,8 @@ export default function NewApplication() {
   // Check backend health function
   const checkBackendHealth = async () => {
     try {
-      await fetch('http://localhost:8000/api/v1/health');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await fetch(`${apiUrl}/api/v1/health`);
       setBackendAvailable(true);
     } catch (err) {
       setBackendAvailable(false);
