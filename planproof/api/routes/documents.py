@@ -2,6 +2,7 @@
 Document Upload & Management Endpoints
 """
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional, List
@@ -21,6 +22,7 @@ from planproof.pipeline.validate import load_rule_catalog, validate_extraction
 from planproof.pipeline.llm_gate import should_trigger_llm, resolve_with_llm_new
 from planproof.config import get_settings
 
+LOGGER = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -48,6 +50,56 @@ class ReclassifyDocumentRequest(BaseModel):
     """Request payload to reclassify a document."""
     document_id: int
     document_type: str
+
+
+class PotentialParentResponse(BaseModel):
+    """Response containing potential parent applications."""
+    application_id: int
+    application_ref: str
+    site_address: Optional[str]
+    postcode: Optional[str]
+    status: str
+    created_at: Optional[str]
+    latest_submission_id: Optional[int]
+
+
+@router.post("/applications/find-parents")
+async def find_potential_parents(
+    site_address: Optional[str] = Form(None),
+    postcode: Optional[str] = Form(None),
+    application_id: Optional[int] = Form(None),
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user)
+) -> List[PotentialParentResponse]:
+    """
+    Find potential parent applications for modification/resubmission scenarios.
+    
+    Searches by site address or postcode to find existing applications
+    that could be parents for a modification.
+    
+    **Form Data:**
+    - site_address: Site address to search
+    - postcode: UK postcode to search
+    - application_id: Current application ID (to exclude from results)
+    
+    **Returns:**
+    - List of potential parent applications with details
+    """
+    from planproof.services.parent_discovery import get_potential_parents
+    
+    extracted_fields = {}
+    if site_address:
+        extracted_fields["site_address"] = site_address
+    if postcode:
+        extracted_fields["postcode"] = postcode
+    
+    potential_parents = get_potential_parents(
+        extracted_fields=extracted_fields,
+        current_application_id=application_id,
+        db=db
+    )
+    
+    return [PotentialParentResponse(**p) for p in potential_parents]
 
 
 async def _process_document_upload(
@@ -171,6 +223,46 @@ async def _process_document_for_run(
             blob_uri=extraction_url,
             metadata={"run_id": run.id}
         )
+
+        # Step 2.5: Auto-discover parent application (if not already set)
+        if parent_submission_id is None and extraction.get("fields"):
+            from planproof.services.parent_discovery import discover_parent_application
+            
+            discovered_parent_id, confidence, reason = discover_parent_application(
+                extracted_fields=extraction["fields"],
+                current_application_id=application_id,
+                db=db
+            )
+            
+            if discovered_parent_id and confidence >= 0.85:
+                # Auto-link with high confidence
+                parent_submission_id = discovered_parent_id
+                LOGGER.info(
+                    f"Auto-discovered parent submission {parent_submission_id} "
+                    f"(confidence={confidence:.2f}): {reason}"
+                )
+                
+                # Update submission with parent link
+                submission_id = ingested.get("submission_id")
+                if submission_id:
+                    session = db.get_session()
+                    try:
+                        from planproof.db import Submission
+                        submission = session.query(Submission).filter(
+                            Submission.id == submission_id
+                        ).first()
+                        if submission:
+                            submission.parent_submission_id = parent_submission_id
+                            session.commit()
+                            LOGGER.info(f"Updated submission {submission_id} with parent {parent_submission_id}")
+                    finally:
+                        session.close()
+            elif discovered_parent_id:
+                # Medium confidence - log for potential manual review
+                LOGGER.info(
+                    f"Potential parent found (confidence={confidence:.2f}): {reason}. "
+                    "Manual confirmation recommended."
+                )
 
         # Step 3: Validate
         rules = load_rule_catalog("artefacts/rule_catalog.json")

@@ -490,16 +490,33 @@ async def get_run_results(
             else:
                 summary["needs_review"] += 1
         
-        # Get document details to show extracted fields
+        # Get extracted fields from database (NEW: Actually fetch fields!)
         extracted_fields = {}
-        for doc in documents:
-            extraction_artefact = session.query(Artefact).filter(
-                Artefact.document_id == doc.id,
-                Artefact.artefact_type == "extraction"
-            ).first()
-
-            if extraction_artefact and extraction_artefact.blob_uri:
-                extracted_fields[doc.id] = {"note": "Extraction data available at blob storage"}
+        if run.application_id:
+            latest_submission = session.query(Submission).filter(
+                Submission.planning_case_id == run.application_id
+            ).order_by(Submission.created_at.desc()).first()
+            
+            if latest_submission:
+                # Query all extracted fields for this submission
+                fields_query = session.query(ExtractedField).filter(
+                    ExtractedField.submission_id == latest_submission.id
+                ).order_by(
+                    ExtractedField.field_name,
+                    ExtractedField.confidence.desc().nullslast()
+                ).all()
+                
+                # Group by field_name and take highest confidence
+                seen_fields = set()
+                for field in fields_query:
+                    if field.field_name not in seen_fields:
+                        extracted_fields[field.field_name] = {
+                            "value": field.field_value,
+                            "confidence": field.confidence,
+                            "extractor": field.extractor,
+                            "evidence_id": field.evidence_id
+                        }
+                        seen_fields.add(field.field_name)
         
         # Count LLM calls from artefacts
         llm_count = 0
