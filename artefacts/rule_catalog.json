@@ -230,9 +230,13 @@
       "rule_id": "R-DOC-003",
       "title": "Design & Access Statement Required",
       "description": "Major applications must include a Design & Access Statement.",
-      "required_fields": [
-        "design_statement"
-      ],
+      "required_fields": [],
+      "config": {
+        "application_type_required_fields": {
+          "full_planning": ["design_statement"],
+          "listed_building": ["design_statement"]
+        }
+      },
       "evidence": {
         "source_types": [
           "all"

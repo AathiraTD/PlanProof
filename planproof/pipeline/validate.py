@@ -1180,6 +1180,8 @@ def _validate_document_required(rule: Rule, context: Dict[str, Any]) -> Optional
     """
     submission_id = context.get("submission_id")
     db = context.get("db")
+    fields = context.get("fields", {})
+    rule_config = rule.to_dict().get("config", {})
     
     if not submission_id or not db:
         return {
@@ -1193,6 +1195,21 @@ def _validate_document_required(rule: Rule, context: Dict[str, Any]) -> Optional
     # Get required documents from rule
     # For DOCUMENT_REQUIRED rules, we expect required_documents field or use required_fields as doc types
     required_docs = rule.required_fields if rule.required_fields else []
+    application_type = str(fields.get("application_type", "")).lower().strip()
+    application_type_requirements = rule_config.get("application_type_required_fields", {})
+    if application_type_requirements:
+        if application_type in application_type_requirements:
+            required_docs = application_type_requirements.get(application_type, [])
+        elif "default" in application_type_requirements:
+            required_docs = application_type_requirements.get("default", [])
+        else:
+            return {
+                "status": "pass",
+                "severity": rule.severity,
+                "message": "Document requirement does not apply for this application type",
+                "missing_fields": [],
+                "evidence": {"application_type": application_type}
+            }
     
     if not required_docs:
         return None  # No documents specified
@@ -1880,6 +1897,17 @@ def validate_extraction(
     session = None
     if write_to_tables and db:
         session = db.get_session()
+
+    if not fields.get("application_type") and submission_id and db:
+        from planproof.db import Submission
+        app_type_session = session or db.get_session()
+        try:
+            submission = app_type_session.query(Submission).filter(Submission.id == submission_id).first()
+            if submission and submission.application_type:
+                fields["application_type"] = submission.application_type
+        finally:
+            if app_type_session is not session:
+                app_type_session.close()
 
     try:
         for rule in rules:

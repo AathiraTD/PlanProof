@@ -512,6 +512,11 @@ def extract_from_pdf_bytes(
                         evidence_id=evidence.id
                     ))
                 session.add_all(extracted_field_records)
+            if submission_id and fields.get("application_type"):
+                from planproof.db import Submission
+                submission = session.query(Submission).filter(Submission.id == submission_id).first()
+                if submission and (not submission.application_type or submission.application_type == "unknown"):
+                    submission.application_type = str(fields.get("application_type"))
             session.commit()
         except Exception as e:
             LOGGER.error(f"Failed to persist extracted fields to database: {str(e)}", exc_info=True)

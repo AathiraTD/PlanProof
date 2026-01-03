@@ -67,6 +67,7 @@ interface ApplicationDetailsData {
   address: string;
   proposal: string;
   applicant_name: string;
+  application_type: string;
   created_at: string;
   status: string;
   run_history: RunHistoryItem[];
@@ -273,6 +274,7 @@ const ApplicationDetails: React.FC = () => {
         applicationId: appData?.id,
         applicationRef: appData?.reference_number,
         applicantName: appData?.applicant_name,
+        applicationType: appData?.application_type,
       },
     });
   };
@@ -491,36 +493,38 @@ const ApplicationDetails: React.FC = () => {
 
         {/* Case Metadata */}
         <Grid container spacing={3}>
-          {shouldRenderField(appData.address) && (
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Address
-              </Typography>
-              <Typography variant="body1" gutterBottom>
-                {appData.address}
-              </Typography>
-            </Grid>
-          )}
-          {shouldRenderField(appData.applicant_name) && (
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Applicant
-              </Typography>
-              <Typography variant="body1" gutterBottom>
-                {appData.applicant_name}
-              </Typography>
-            </Grid>
-          )}
-          {shouldRenderField(appData.proposal) && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Proposal
-              </Typography>
-              <Typography variant="body1" gutterBottom>
-                {appData.proposal}
-              </Typography>
-            </Grid>
-          )}
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Address
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              {appData.address}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Applicant
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              {appData.applicant_name}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Application Type
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              {appData.application_type ? appData.application_type.replace(/_/g, ' ') : 'Unknown'}
+            </Typography>
+          </Grid>
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Proposal
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              {appData.proposal}
+            </Typography>
+          </Grid>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle2" color="text.secondary">
               Submitted

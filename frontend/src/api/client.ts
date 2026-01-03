@@ -76,7 +76,8 @@ export const api = {
   uploadFiles: async (
     applicationRef: string,
     files: File[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    applicationType?: string
   ) => {
     // Upload files one at a time since backend accepts single file per request
     const results = [];
@@ -84,6 +85,9 @@ export const api = {
       const file = files[i];
       const formData = new FormData();
       formData.append('file', file);
+      if (applicationType) {
+        formData.append('application_type', applicationType);
+      }
 
       const response = await apiClient.post(`/api/v1/applications/${applicationRef}/documents`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -105,13 +109,17 @@ export const api = {
   uploadApplicationRun: async (
     applicationId: number,
     files: File[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    applicationType?: string
   ) => {
     const results = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const formData = new FormData();
       formData.append('file', file);
+      if (applicationType) {
+        formData.append('application_type', applicationType);
+      }
 
       const response = await apiClient.post(`/api/v1/applications/${applicationId}/runs`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },

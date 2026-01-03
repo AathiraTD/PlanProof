@@ -71,6 +71,7 @@ class Submission(Base):
     )  # Values: "modification", "new_construction", "resubmission"
     submission_type_confidence = Column(Float, nullable=True)  # 0.0-1.0 from LLM classification
     submission_type_source = Column(String(20), nullable=True)  # "llm", "user", "heuristic"
+    application_type = Column(String(50), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -614,7 +615,8 @@ class Database:
         submission_version: str,
         parent_submission_id: Optional[int] = None,
         status: str = "pending",
-        submission_metadata: Optional[Dict] = None
+        submission_metadata: Optional[Dict] = None,
+        application_type: Optional[str] = None
     ) -> Submission:
         """Create a new submission."""
         session = self.get_session()
@@ -624,7 +626,8 @@ class Database:
                 submission_version=submission_version,
                 parent_submission_id=parent_submission_id,
                 status=status,
-                submission_metadata=submission_metadata or {}
+                submission_metadata=submission_metadata or {},
+                application_type=application_type
             )
             session.add(submission)
             session.commit()
