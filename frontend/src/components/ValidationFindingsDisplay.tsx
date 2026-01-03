@@ -1,9 +1,9 @@
-import { Box, Typography, Stack, Paper, Chip, Alert, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
-import { 
-  Error, 
-  Warning, 
-  Info, 
-  CheckCircle, 
+import { Box, Typography, Stack, Paper, Chip, Alert, Accordion, AccordionSummary, AccordionDetails, Button } from '@mui/material';
+import {
+  Error,
+  Warning,
+  Info,
+  CheckCircle,
   ExpandMore,
   Description,
   Visibility,
@@ -16,6 +16,7 @@ import {
   Nature,
   Architecture
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 
 interface ValidationFinding {
   rule_id: string;
@@ -33,6 +34,8 @@ interface ValidationFinding {
 interface ValidationFindingsDisplayProps {
   findings: ValidationFinding[];
   onViewDocument?: (documentId: number, evidenceDetails?: any) => void;
+  runId?: number;
+  applicationId?: number;
 }
 
 // Category-based organization with user-friendly labels
@@ -164,7 +167,7 @@ const getStatusColor = (status: string, severity: string): 'error' | 'warning' |
   return 'info';
 };
 
-export default function ValidationFindingsDisplay({ findings, onViewDocument }: ValidationFindingsDisplayProps) {
+export default function ValidationFindingsDisplay({ findings, onViewDocument, runId, applicationId }: ValidationFindingsDisplayProps) {
   // Group by category
   const groupedByCategory = findings.reduce((acc, finding) => {
     const category = finding.rule_category || 'FIELD_REQUIRED';
@@ -193,6 +196,8 @@ export default function ValidationFindingsDisplay({ findings, onViewDocument }: 
 
   // Check if all findings are passed
   const allPassed = findings.length > 0 && findings.every(f => f.status === 'pass');
+  const needsReviewCount = findings.filter(f => f.status === 'needs_review').length;
+  const navigate = useNavigate();
 
   if (findings.length === 0) {
     return (
@@ -207,29 +212,41 @@ export default function ValidationFindingsDisplay({ findings, onViewDocument }: 
 
   return (
     <Stack spacing={3}>
+      {/* Needs Review Summary Banner */}
+      {needsReviewCount > 0 && runId && applicationId && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+                ⚠️ {needsReviewCount} {needsReviewCount === 1 ? 'Item Needs' : 'Items Need'} Manual Review
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                These items require verification by a planning officer. The AI found relevant information but cannot automatically determine compliance.
+              </Typography>
+            </Box>
+            <Button
+              variant="contained"
+              color="warning"
+              onClick={() => navigate(`/applications/${applicationId}/runs/${runId}/review`)}
+              sx={{ ml: 2, whiteSpace: 'nowrap' }}
+            >
+              Start Review
+            </Button>
+          </Box>
+        </Alert>
+      )}
+
       {allCategories.map((categoryKey) => {
         const config = CATEGORY_CONFIG[categoryKey];
         const categoryFindings = deduplicateFindings(groupedByCategory[categoryKey] || []);
-        
+
         // Count pass/fail
         const passedCount = categoryFindings.filter(f => f.status === 'pass').length;
         const issueCount = categoryFindings.length - passedCount;
-        
-        // If no findings in this category, show as "No issues"
+
+        // Skip categories with no findings at all - don't show empty categories
         if (categoryFindings.length === 0) {
-          return (
-            <Paper key={categoryKey} elevation={1} sx={{ p: 2.5, bgcolor: 'success.lighter', borderLeft: '4px solid', borderLeftColor: 'success.main' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <CheckCircle color="success" />
-                <Typography variant="body1" fontWeight={600} color="success.main">
-                  ✓ {config.label}: No issues
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ ml: 4.5, mt: 0.5 }}>
-                {config.description}
-              </Typography>
-            </Paper>
-          );
+          return null;
         }
 
         return (

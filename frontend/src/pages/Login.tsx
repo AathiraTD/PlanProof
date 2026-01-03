@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -37,9 +38,11 @@ const Login: React.FC = () => {
     try {
       await login(username, password);
 
-      // Redirect to dashboard or previous page
-      const redirectTo = new URLSearchParams(window.location.search).get('redirect') || '/new-application';
-      navigate(redirectTo);
+      // Redirect to intended page or default
+      const from = (location.state as any)?.from?.pathname ||
+                   new URLSearchParams(window.location.search).get('redirect') ||
+                   '/new-application';
+      navigate(from, { replace: true });
     } catch (err: any) {
       console.error('Login failed:', err);
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
