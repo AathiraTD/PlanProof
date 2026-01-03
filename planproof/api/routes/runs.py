@@ -16,6 +16,7 @@ router = APIRouter()
 class RunResponse(BaseModel):
     """Run response model."""
     id: int
+    application_id: Optional[int]
     application_ref: Optional[str]
     run_type: str
     status: str
@@ -70,6 +71,7 @@ async def list_runs(
             
             results.append(RunResponse(
                 id=run.id,
+                application_id=run.application_id,
                 application_ref=app.application_ref if app else None,
                 run_type=run.run_type,
                 status=run.status,
@@ -110,6 +112,7 @@ async def get_run(
         
         return RunResponse(
             id=run.id,
+            application_id=run.application_id,
             application_ref=app.application_ref if app else None,
             run_type=run.run_type,
             status=run.status,

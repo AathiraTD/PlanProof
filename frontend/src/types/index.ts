@@ -9,6 +9,7 @@ export interface Run {
   id: number;
   run_type: string;
   application_id?: number;
+  application_ref?: string;
   started_at: string;
   completed_at?: string;
   status: 'running' | 'completed' | 'failed';

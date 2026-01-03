@@ -378,6 +378,25 @@ async def upload_document(
     - document_id: Database document ID
     - blob_uri: Location of uploaded PDF
     """
+    # Get or create application to get its ID
+    session = db.get_session()
+    try:
+        from planproof.db import Application
+        app = session.query(Application).filter(
+            Application.application_ref == application_ref
+        ).first()
+        
+        if not app:
+            # Create application if it doesn't exist
+            app = db.create_application(
+                application_ref=application_ref,
+                applicant_name=None
+            )
+        
+        application_id = app.id
+    finally:
+        session.close()
+    
     return await _process_document_upload(
         application_ref=application_ref,
         file=file,
@@ -386,7 +405,8 @@ async def upload_document(
         docintel=docintel,
         aoai=aoai,
         document_type=document_type,
-        application_type=application_type
+        application_type=application_type,
+        application_id=application_id
     )
 
 
