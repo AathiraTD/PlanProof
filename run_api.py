@@ -35,9 +35,9 @@ if __name__ == "__main__":
     enable_reload = environment == "development"
 
     if enable_reload:
-        print("⚠️  Running in DEVELOPMENT mode with auto-reload enabled")
+        print("[DEV] Running in DEVELOPMENT mode with auto-reload enabled")
     else:
-        print("✓ Running in PRODUCTION mode with auto-reload disabled")
+        print("[PROD] Running in PRODUCTION mode with auto-reload disabled")
 
     uvicorn.run(
         "planproof.api.main:app",

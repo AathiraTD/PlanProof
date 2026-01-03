@@ -1,0 +1,83 @@
+{
+  "run_id": 6,
+  "application_ref": "202406781PA",
+  "total_documents": 6,
+  "successes": 6,
+  "failures": 0,
+  "llm_calls": 1,
+  "llm_calls_per_run": 1,
+  "results": [
+    {
+      "document_id": 79,
+      "filename": "Document-37C6703924378E2CBFF809CB8EE1315C.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 2,
+        "needs_review": 1,
+        "fail": 0,
+        "needs_llm": false
+      },
+      "llm_triggered": false
+    },
+    {
+      "document_id": 80,
+      "filename": "Document-835AC4C419D453889B7399679FF9278D.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 1,
+        "needs_review": 2,
+        "fail": 0,
+        "needs_llm": true
+      },
+      "llm_triggered": true
+    },
+    {
+      "document_id": 80,
+      "filename": "Document-835AC4C419D453889B7399679FF9278D.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 1,
+        "needs_review": 2,
+        "fail": 0,
+        "needs_llm": true
+      },
+      "llm_triggered": false
+    },
+    {
+      "document_id": 79,
+      "filename": "Document-37C6703924378E2CBFF809CB8EE1315C.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 2,
+        "needs_review": 1,
+        "fail": 0,
+        "needs_llm": false
+      },
+      "llm_triggered": false
+    },
+    {
+      "document_id": 80,
+      "filename": "Document-835AC4C419D453889B7399679FF9278D.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 1,
+        "needs_review": 2,
+        "fail": 0,
+        "needs_llm": true
+      },
+      "llm_triggered": false
+    },
+    {
+      "document_id": 80,
+      "filename": "Document-835AC4C419D453889B7399679FF9278D.pdf",
+      "validation_summary": {
+        "rule_count": 3,
+        "pass": 1,
+        "needs_review": 2,
+        "fail": 0,
+        "needs_llm": true
+      },
+      "llm_triggered": false
+    }
+  ]
+}

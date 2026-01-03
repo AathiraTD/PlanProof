@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     # API Configuration
     api_cors_origins: list[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8501"],
+        default=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:8501"],
         alias="API_CORS_ORIGINS"
     )
     api_keys: list[str] = Field(default_factory=list, alias="API_KEYS")
