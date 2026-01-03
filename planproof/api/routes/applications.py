@@ -136,6 +136,7 @@ async def get_application(
                     "id": sub.id,
                     "version": sub.submission_version,
                     "status": sub.status,
+                    "application_type": sub.application_type,
                     "created_at": sub.created_at.isoformat() if sub.created_at else None
                 }
                 for sub in submissions
@@ -232,6 +233,7 @@ async def get_application_details(
         extracted_address = _get_latest_field_value(["site_address", "address"])
         extracted_proposal = _get_latest_field_value(["proposal_description", "proposed_use"])
         extracted_applicant = _get_latest_field_value(["applicant_name"])
+        extracted_application_type = _get_latest_field_value(["application_type"])
 
         # Update Application record if we have better data from extraction
         if extracted_address and not app.site_address:
@@ -240,6 +242,11 @@ async def get_application_details(
             app.proposal_description = extracted_proposal
         if extracted_applicant and not app.applicant_name:
             app.applicant_name = extracted_applicant
+        if extracted_application_type and latest_submission and (
+            not latest_submission.application_type or latest_submission.application_type == "unknown"
+        ):
+            latest_submission.application_type = extracted_application_type
+            session.commit()
         
         if extracted_address or extracted_proposal or extracted_applicant:
             session.commit()
@@ -253,6 +260,11 @@ async def get_application_details(
             "address": app.site_address or extracted_address or "Not available",
             "proposal": app.proposal_description or extracted_proposal or "Not available",
             "applicant_name": app.applicant_name or extracted_applicant or "Unknown",
+            "application_type": (
+                latest_submission.application_type
+                if latest_submission and latest_submission.application_type
+                else extracted_application_type or "unknown"
+            ),
             "created_at": app.created_at.isoformat() if app.created_at else None,
             "status": latest_status,
             "run_history": run_history

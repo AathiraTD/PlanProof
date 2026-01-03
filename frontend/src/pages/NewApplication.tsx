@@ -14,6 +14,10 @@ import {
   CircularProgress,
   AlertTitle,
   Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { CloudUpload, Close, CheckCircle, Error as ErrorIcon, Refresh } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
@@ -38,11 +42,13 @@ export default function NewApplication() {
     applicationId?: number;
     applicationRef?: string;
     applicantName?: string;
+    applicationType?: string;
   } | null;
   const existingApplicationId = locationState?.applicationId ?? null;
   const isVersionUpload = Boolean(existingApplicationId);
   const [applicationRef, setApplicationRef] = useState('');
   const [applicantName, setApplicantName] = useState('');
+  const [applicationType, setApplicationType] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [fileProgress, setFileProgress] = useState<Map<string, FileProgress>>(new Map());
@@ -79,6 +85,9 @@ export default function NewApplication() {
         if (locationState?.applicantName) {
           setApplicantName(locationState.applicantName);
         }
+        if (locationState?.applicationType) {
+          setApplicationType(locationState.applicationType);
+        }
         return;
       }
 
@@ -88,8 +97,11 @@ export default function NewApplication() {
       if (locationState?.applicantName) {
         setApplicantName(locationState.applicantName);
       }
+      if (locationState?.applicationType) {
+        setApplicationType(locationState.applicationType);
+      }
 
-      if (locationState?.applicationRef && locationState?.applicantName) {
+      if (locationState?.applicationRef && locationState?.applicantName && locationState?.applicationType) {
         return;
       }
 
@@ -98,6 +110,7 @@ export default function NewApplication() {
         const details = await api.getApplicationDetails(existingApplicationId);
         setApplicationRef(details.reference_number || '');
         setApplicantName(details.applicant_name || '');
+        setApplicationType(details.application_type || '');
       } catch (err: any) {
         console.error('Failed to load application for version upload:', err);
         setError(getApiErrorMessage(err, 'Failed to load application details for version upload'));
@@ -107,7 +120,12 @@ export default function NewApplication() {
     };
 
     loadExistingApplication();
-  }, [existingApplicationId, locationState?.applicationRef, locationState?.applicantName]);
+  }, [
+    existingApplicationId,
+    locationState?.applicationRef,
+    locationState?.applicantName,
+    locationState?.applicationType,
+  ]);
 
   const validateFiles = (newFiles: File[]): string[] => {
     const errors: string[] = [];
@@ -215,7 +233,7 @@ export default function NewApplication() {
           size: fileToRetry.size,
         });
         setFileProgress(updated);
-      });
+      }, applicationType || undefined);
 
       const updated = new Map(fileProgress);
       updated.set(fileName, {
@@ -317,7 +335,7 @@ export default function NewApplication() {
               });
               return updated;
             });
-          });
+          }, applicationType || undefined);
 
           // Update to completed
           setFileProgress((prev) => {
@@ -458,6 +476,24 @@ export default function NewApplication() {
               fullWidth
               disabled={uploading || isVersionUpload || loadingApplication}
             />
+
+            <FormControl fullWidth disabled={uploading || loadingApplication}>
+              <InputLabel id="application-type-label">Application Type</InputLabel>
+              <Select
+                labelId="application-type-label"
+                value={applicationType}
+                label="Application Type"
+                onChange={(event) => setApplicationType(event.target.value)}
+              >
+                <MenuItem value="">Select application type</MenuItem>
+                <MenuItem value="householder">Householder</MenuItem>
+                <MenuItem value="full_planning">Full Planning</MenuItem>
+                <MenuItem value="prior_approval">Prior Approval</MenuItem>
+                <MenuItem value="listed_building">Listed Building</MenuItem>
+                <MenuItem value="advertisement">Advertisement</MenuItem>
+                <MenuItem value="unknown">Unknown</MenuItem>
+              </Select>
+            </FormControl>
 
             {/* File Upload */}
             <Box>

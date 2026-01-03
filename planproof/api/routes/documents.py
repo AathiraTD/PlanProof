@@ -58,6 +58,7 @@ async def _process_document_upload(
     docintel: DocumentIntelligence,
     aoai: AzureOpenAIClient,
     document_type: Optional[str] = None,
+    application_type: Optional[str] = None,
     application_id: Optional[int] = None,
     parent_submission_id: Optional[int] = None,
     applicant_name: Optional[str] = None,
@@ -79,6 +80,7 @@ async def _process_document_upload(
             "application_ref": application_ref,
             "filename": file.filename,
             "document_type": document_type,
+            "application_type": application_type,
             "source": "api",
             "parent_submission_id": parent_submission_id,
             "is_modification": parent_submission_id is not None
@@ -95,6 +97,7 @@ async def _process_document_upload(
             docintel=docintel,
             aoai=aoai,
             document_type=document_type,
+            application_type=application_type,
             application_id=application_id,
             parent_submission_id=parent_submission_id,
             applicant_name=applicant_name
@@ -118,6 +121,7 @@ async def _process_document_for_run(
     docintel: DocumentIntelligence,
     aoai: AzureOpenAIClient,
     document_type: Optional[str] = None,
+    application_type: Optional[str] = None,
     application_id: Optional[int] = None,
     parent_submission_id: Optional[int] = None,
     applicant_name: Optional[str] = None
@@ -138,6 +142,7 @@ async def _process_document_for_run(
             tmp_path,
             application_ref,
             applicant_name=applicant_name,
+            application_type=application_type,
             storage_client=storage,
             db=db,
             parent_submission_id=parent_submission_id
@@ -253,6 +258,7 @@ async def upload_document(
     application_ref: str,
     file: UploadFile = File(..., description="PDF file to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -287,7 +293,8 @@ async def upload_document(
         storage=storage,
         docintel=docintel,
         aoai=aoai,
-        document_type=document_type
+        document_type=document_type,
+        application_type=application_type
     )
 
 
@@ -300,6 +307,7 @@ async def upload_documents_batch(
     files: Optional[List[UploadFile]] = File(None, description="PDF files to upload"),
     documents: Optional[List[UploadFile]] = File(None, description="PDF files to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -355,6 +363,7 @@ async def upload_documents_batch(
                     docintel=docintel,
                     aoai=aoai,
                     document_type=document_type,
+                    application_type=application_type,
                     application_id=application.id,
                     parent_submission_id=None,
                     applicant_name=None
@@ -382,6 +391,7 @@ async def upload_application_run(
     application_id: int,
     file: UploadFile = File(..., description="PDF file to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -420,6 +430,7 @@ async def upload_application_run(
         docintel=docintel,
         aoai=aoai,
         document_type=document_type,
+        application_type=application_type,
         application_id=application.id,
         parent_submission_id=parent_submission_id,
         applicant_name=application.applicant_name,

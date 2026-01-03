@@ -66,6 +66,7 @@ interface ApplicationDetailsData {
   address: string;
   proposal: string;
   applicant_name: string;
+  application_type: string;
   created_at: string;
   status: string;
   run_history: RunHistoryItem[];
@@ -192,6 +193,7 @@ const ApplicationDetails: React.FC = () => {
         applicationId: appData?.id,
         applicationRef: appData?.reference_number,
         applicantName: appData?.applicant_name,
+        applicationType: appData?.application_type,
       },
     });
   };
@@ -396,6 +398,14 @@ const ApplicationDetails: React.FC = () => {
             </Typography>
             <Typography variant="body1" gutterBottom>
               {appData.applicant_name}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Application Type
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              {appData.application_type ? appData.application_type.replace(/_/g, ' ') : 'Unknown'}
             </Typography>
           </Grid>
           <Grid item xs={12}>
