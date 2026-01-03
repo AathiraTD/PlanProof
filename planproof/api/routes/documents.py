@@ -44,6 +44,12 @@ class BatchDocumentUploadResponse(BaseModel):
     message: str
 
 
+class ReclassifyDocumentRequest(BaseModel):
+    """Request payload to reclassify a document."""
+    document_id: int
+    document_type: str
+
+
 async def _process_document_upload(
     application_ref: str,
     file: UploadFile,
@@ -52,6 +58,7 @@ async def _process_document_upload(
     docintel: DocumentIntelligence,
     aoai: AzureOpenAIClient,
     document_type: Optional[str] = None,
+    application_type: Optional[str] = None,
     application_id: Optional[int] = None,
     parent_submission_id: Optional[int] = None,
     applicant_name: Optional[str] = None,
@@ -73,6 +80,7 @@ async def _process_document_upload(
             "application_ref": application_ref,
             "filename": file.filename,
             "document_type": document_type,
+            "application_type": application_type,
             "source": "api",
             "parent_submission_id": parent_submission_id,
             "is_modification": parent_submission_id is not None
@@ -89,6 +97,7 @@ async def _process_document_upload(
             docintel=docintel,
             aoai=aoai,
             document_type=document_type,
+            application_type=application_type,
             application_id=application_id,
             parent_submission_id=parent_submission_id,
             applicant_name=applicant_name
@@ -112,6 +121,7 @@ async def _process_document_for_run(
     docintel: DocumentIntelligence,
     aoai: AzureOpenAIClient,
     document_type: Optional[str] = None,
+    application_type: Optional[str] = None,
     application_id: Optional[int] = None,
     parent_submission_id: Optional[int] = None,
     applicant_name: Optional[str] = None
@@ -132,6 +142,7 @@ async def _process_document_for_run(
             tmp_path,
             application_ref,
             applicant_name=applicant_name,
+            application_type=application_type,
             storage_client=storage,
             db=db,
             parent_submission_id=parent_submission_id
@@ -247,6 +258,7 @@ async def upload_document(
     application_ref: str,
     file: UploadFile = File(..., description="PDF file to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -281,7 +293,8 @@ async def upload_document(
         storage=storage,
         docintel=docintel,
         aoai=aoai,
-        document_type=document_type
+        document_type=document_type,
+        application_type=application_type
     )
 
 
@@ -294,6 +307,7 @@ async def upload_documents_batch(
     files: Optional[List[UploadFile]] = File(None, description="PDF files to upload"),
     documents: Optional[List[UploadFile]] = File(None, description="PDF files to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -349,6 +363,7 @@ async def upload_documents_batch(
                     docintel=docintel,
                     aoai=aoai,
                     document_type=document_type,
+                    application_type=application_type,
                     application_id=application.id,
                     parent_submission_id=None,
                     applicant_name=None
@@ -376,6 +391,7 @@ async def upload_application_run(
     application_id: int,
     file: UploadFile = File(..., description="PDF file to upload"),
     document_type: Optional[str] = Form(None, description="Document type (application_form, site_plan, etc.)"),
+    application_type: Optional[str] = Form(None, description="Application type (householder, full_planning, etc.)"),
     db: Database = Depends(get_db),
     storage: StorageClient = Depends(get_storage_client),
     docintel: DocumentIntelligence = Depends(get_docintel_client),
@@ -414,6 +430,7 @@ async def upload_application_run(
         docintel=docintel,
         aoai=aoai,
         document_type=document_type,
+        application_type=application_type,
         application_id=application.id,
         parent_submission_id=parent_submission_id,
         applicant_name=application.applicant_name,
@@ -424,8 +441,7 @@ async def upload_application_run(
 @router.post("/runs/{run_id}/reclassify_document")
 async def reclassify_document(
     run_id: int,
-    document_id: int = Form(..., description="Document ID to reclassify"),
-    document_type: str = Form(..., description="New document type classification"),
+    payload: ReclassifyDocumentRequest,
     db: Database = Depends(get_db),
     user: dict = Depends(get_current_user)
 ):
@@ -435,7 +451,7 @@ async def reclassify_document(
     **Path Parameters:**
     - run_id: Run ID
     
-    **Form Data:**
+    **Body:**
     - document_id: ID of the document to reclassify
     - document_type: New document type (e.g., "site_plan", "application_form", etc.)
     
@@ -445,21 +461,21 @@ async def reclassify_document(
     session = db.get_session()
     try:
         # Validate document exists
-        document = session.query(Document).filter(Document.id == document_id).first()
+        document = session.query(Document).filter(Document.id == payload.document_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Update document type
         old_type = document.document_type
-        document.document_type = document_type
+        document.document_type = payload.document_type
         session.commit()
         
         # TODO: Re-run validation rules that depend on document type
         
         return {
-            "document_id": document_id,
+            "document_id": payload.document_id,
             "old_type": old_type,
-            "new_type": document_type,
+            "new_type": payload.document_type,
             "filename": document.filename,
             "message": "Document reclassified successfully. Validation will be re-run."
         }

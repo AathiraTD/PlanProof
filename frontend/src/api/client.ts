@@ -76,7 +76,8 @@ export const api = {
   uploadFiles: async (
     applicationRef: string,
     files: File[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    applicationType?: string
   ) => {
     // Upload files one at a time since backend accepts single file per request
     const results = [];
@@ -84,6 +85,9 @@ export const api = {
       const file = files[i];
       const formData = new FormData();
       formData.append('file', file);
+      if (applicationType) {
+        formData.append('application_type', applicationType);
+      }
 
       const response = await apiClient.post(`/api/v1/applications/${applicationRef}/documents`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -105,13 +109,17 @@ export const api = {
   uploadApplicationRun: async (
     applicationId: number,
     files: File[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    applicationType?: string
   ) => {
     const results = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const formData = new FormData();
       formData.append('file', file);
+      if (applicationType) {
+        formData.append('application_type', applicationType);
+      }
 
       const response = await apiClient.post(`/api/v1/applications/${applicationId}/runs`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -197,13 +205,25 @@ export const api = {
   },
 
   submitReviewDecision: async (runId: number, checkId: number, decision: string, comment?: string) => {
-    // Get real user ID from token
-    const userInfo = await api.getUserInfo();
     const response = await apiClient.post(`/api/v1/runs/${runId}/findings/${checkId}/review`, {
       decision,
       comment: comment || '',
-      user_id: userInfo.user_id || 1, // Fallback to 1 if no user_id
     });
+    return response.data;
+  },
+
+  submitEvidenceFeedback: async (
+    runId: number,
+    checkId: number,
+    payload: {
+      document_id: number;
+      page_number?: number;
+      evidence_id?: number;
+      is_relevant: boolean;
+      comment?: string;
+    }
+  ) => {
+    const response = await apiClient.post(`/api/v1/runs/${runId}/findings/${checkId}/evidence-feedback`, payload);
     return response.data;
   },
 
@@ -227,7 +247,7 @@ export const api = {
   reclassifyDocument: async (runId: number, documentId: number, newType: string) => {
     const response = await apiClient.post(`/api/v1/runs/${runId}/reclassify_document`, {
       document_id: documentId,
-      new_document_type: newType,
+      document_type: newType,
     });
     return response.data;
   },

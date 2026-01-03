@@ -20,6 +20,7 @@ def ingest_pdf(
     application_ref: str,
     applicant_name: Optional[str] = None,
     application_date: Optional[datetime] = None,
+    application_type: Optional[str] = None,
     blob_name: Optional[str] = None,
     storage_client: Optional[StorageClient] = None,
     db: Optional[Database] = None,
@@ -50,6 +51,8 @@ def ingest_pdf(
         storage_client = StorageClient()
     if db is None:
         db = Database()
+
+    normalized_application_type = application_type.lower() if application_type else None
 
     # Validate PDF exists
     pdf_path_obj = Path(pdf_path)
@@ -141,7 +144,8 @@ def ingest_pdf(
             planning_case_id=application.id,
             submission_version=next_version,
             status="pending",
-            parent_submission_id=parent_submission_id
+            parent_submission_id=parent_submission_id,
+            application_type=normalized_application_type or parent_submission.application_type
         )
     else:
         # Get or create V0 submission for this application
@@ -150,8 +154,19 @@ def ingest_pdf(
             submission = db.create_submission(
                 planning_case_id=application.id,
                 submission_version="V0",
-                status="pending"
+                status="pending",
+                application_type=normalized_application_type
             )
+        elif normalized_application_type and submission.application_type in (None, "unknown"):
+            session = db.get_session()
+            try:
+                submission = session.query(Submission).filter(Submission.id == submission.id).first()
+                if submission:
+                    submission.application_type = normalized_application_type
+                    session.commit()
+                    session.refresh(submission)
+            finally:
+                session.close()
 
     # Check if document with same hash already exists
     session = db.get_session()
