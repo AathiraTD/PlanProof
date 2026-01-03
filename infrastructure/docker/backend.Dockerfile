@@ -39,7 +39,6 @@ COPY --from=builder /root/.local /usr/local
 COPY planproof/ ./planproof/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
-COPY artefacts/ ./artefacts/
 COPY main.py .
 COPY run_api.py .
 COPY pyproject.toml .
@@ -47,12 +46,13 @@ COPY pyproject.toml .
 # Create necessary directories
 RUN mkdir -p runs data && chmod 777 runs data
 
+# Copy entry point script first (before user creation)
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Create non-root user
 RUN useradd -m -u 1000 planproof && \
     chown -R planproof:planproof /app
-
-# Switch to non-root user
-USER planproof
 
 # Expose FastAPI port
 EXPOSE 8000
@@ -61,13 +61,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
-# Entry point script
-COPY --chown=planproof:planproof docker-entrypoint.sh /usr/local/bin/
-USER root
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Switch to non-root user
 USER planproof
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/docker-entrypoint.sh"]
 
 # Default command: run FastAPI with uvicorn
 CMD ["uvicorn", "planproof.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
