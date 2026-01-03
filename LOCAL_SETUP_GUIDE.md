@@ -1,6 +1,59 @@
 # PlanProof - Local Setup Guide
 
-**Run the fixed UI on your local machine where you CAN access the browser**
+**Choose your preferred setup method**
+
+---
+
+## 🐳 Option 1: Docker Setup (Recommended ⭐)
+
+**Easiest and cleanest way - Everything runs in containers**
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Git
+- Your `.env` file
+
+### Quick Start
+
+```bash
+# Clone repository
+git clone https://github.com/sgshaji/PlanProof.git
+cd PlanProof
+
+# Start everything with Docker
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+**Done!** 🎉
+
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000/docs
+
+### Development with Hot Reload
+
+```bash
+# Use dev configuration for auto-reload
+docker-compose -f docker-compose.dev.yml up
+```
+
+Code changes automatically reload - no restart needed!
+
+### Stop Services
+
+```bash
+docker-compose down
+```
+
+**📖 Full Docker Guide**: See [DOCKER_SETUP.md](./DOCKER_SETUP.md)
+
+---
+
+## 🔧 Option 2: Manual Setup
+
+**For developers who prefer traditional setup**
 
 ---
 

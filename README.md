@@ -99,45 +99,88 @@ Deployment:  Docker + Azure App Service
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 🐳 Option 1: Docker (Recommended)
+
+**Fastest way to get started - everything in containers!**
+
+```bash
+# Clone repository
+git clone https://github.com/sgshaji/PlanProof.git
+cd PlanProof
+
+# Make sure .env file exists with Azure credentials
+
+# Start everything
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+**Done!** 🎉 Access the app:
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000/docs
+
+📖 **Full Docker Guide**: [DOCKER_SETUP.md](./DOCKER_SETUP.md)
+
+---
+
+### 🔧 Option 2: Manual Setup
+
+Prerequisites
 
 - Python 3.11 or higher
-- PostgreSQL 13+ with PostGIS extension
+- Node.js 18+
 - Azure account (OpenAI + Document Intelligence + Blob Storage)
 - Git
 
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/planproof.git
+git clone https://github.com/sgshaji/PlanProof.git
 cd planproof
 ```
 
-### 2. Environment Setup
+### 2. Backend Setup
 
 **Windows:**
 ```powershell
-.\setup-dev.ps1
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -e .
+
+# Start backend
+python run_api.py
 ```
 
 **Linux/Mac:**
 ```bash
-chmod +x setup-dev.sh
-./setup-dev.sh
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -e .
+
+# Start backend
+python run_api.py
 ```
 
 ### 3. Configure Environment
 
-Copy `.env.example` to `.env` and configure:
+Make sure your `.env` file contains:
 
 ```bash
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/planning_validation
+# Azure PostgreSQL (already configured)
+DATABASE_URL=postgresql://...
 
 # Azure OpenAI
 AZURE_OPENAI_ENDPOINT=https://your-instance.openai.azure.com
 AZURE_OPENAI_API_KEY=your-key-here
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 
 # Azure Document Intelligence
 AZURE_DOCINTEL_ENDPOINT=https://your-instance.cognitiveservices.azure.com
@@ -147,7 +190,17 @@ AZURE_DOCINTEL_KEY=your-key-here
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;...
 ```
 
-### 4. Initialize Database
+### 4. Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend runs on: http://localhost:3000
+
+### 5. Database Setup (if needed)
 
 ```bash
 # Run migrations

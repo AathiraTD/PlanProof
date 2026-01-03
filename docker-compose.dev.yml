@@ -1,10 +1,10 @@
 services:
-  # Backend API (FastAPI)
+  # Backend API (FastAPI) - Development Mode
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: planproof-backend
+    container_name: planproof-backend-dev
     environment:
       # Use Azure PostgreSQL from .env
       DATABASE_URL: ${DATABASE_URL}
@@ -20,10 +20,10 @@ services:
       AZURE_OPENAI_CHAT_DEPLOYMENT: ${AZURE_OPENAI_CHAT_DEPLOYMENT:-gpt-4o-mini}
       
       # Application Settings
-      APP_ENV: ${APP_ENV:-production}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
       API_VERSION: ${API_VERSION:-v1}
-      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-["http://localhost:3000"]}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-["http://localhost:3000","http://localhost:3001"]}
       
       # Feature Flags
       ENABLE_DB_WRITES: ${ENABLE_DB_WRITES:-true}
@@ -38,12 +38,18 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # Mount source code for hot reload
+      - ./planproof:/app/planproof
+      - ./main.py:/app/main.py
+      - ./run_api.py:/app/run_api.py
+      - ./alembic:/app/alembic
       - ./runs:/app/runs
       - ./artefacts:/app/artefacts
       - ./data:/app/data
     networks:
       - planproof-network
     restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -51,25 +57,26 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend (React + Vite + Nginx)
+  # Frontend (React + Vite) - Development Mode with Hot Reload
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: planproof-frontend
+    image: node:18-alpine
+    container_name: planproof-frontend-dev
+    working_dir: /app
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - NODE_ENV=development
     ports:
-      - "3000:80"
-    depends_on:
-      - backend
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      - /app/node_modules
     networks:
       - planproof-network
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - backend
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
 networks:
   planproof-network:

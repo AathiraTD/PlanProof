@@ -1,4 +1,4 @@
-# Multi-stage build for production-ready image
+# Multi-stage build for production-ready backend
 
 # Stage 1: Builder
 FROM python:3.11-slim as builder
@@ -33,10 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
-
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+COPY --from=builder /root/.local /usr/local
 
 # Copy application code
 COPY planproof/ ./planproof/
@@ -44,11 +41,11 @@ COPY alembic/ ./alembic/
 COPY alembic.ini .
 COPY artefacts/ ./artefacts/
 COPY main.py .
-COPY run_ui.py .
+COPY run_api.py .
 COPY pyproject.toml .
 
-# Create runs directory
-RUN mkdir -p runs && chmod 777 runs
+# Create necessary directories
+RUN mkdir -p runs data && chmod 777 runs data
 
 # Create non-root user
 RUN useradd -m -u 1000 planproof && \
@@ -57,18 +54,20 @@ RUN useradd -m -u 1000 planproof && \
 # Switch to non-root user
 USER planproof
 
-# Expose Streamlit port
-EXPOSE 8501
+# Expose FastAPI port
+EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 # Entry point script
 COPY --chown=planproof:planproof docker-entrypoint.sh /usr/local/bin/
+USER root
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+USER planproof
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Default command: run Streamlit UI
-CMD ["streamlit", "run", "planproof/ui/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Default command: run FastAPI with uvicorn
+CMD ["uvicorn", "planproof.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
