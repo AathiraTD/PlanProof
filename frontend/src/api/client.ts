@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -37,12 +37,13 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      // Only redirect to login if auth is actually configured
       const hasToken = localStorage.getItem('token');
       if (hasToken) {
         localStorage.removeItem('token');
-        // Note: Login page doesn't exist yet, so just clear token for now
-        console.warn('Authentication failed - token cleared');
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/login') {
+          window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        }
       }
     }
 
@@ -79,31 +80,32 @@ export const api = {
     onProgress?: (progress: number) => void,
     applicationType?: string
   ) => {
-    // Upload files one at a time since backend accepts single file per request
-    const results = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const formData = new FormData();
-      formData.append('file', file);
-      if (applicationType) {
-        formData.append('application_type', applicationType);
-      }
+    // Use batch upload endpoint to process all files in a single run
+    const formData = new FormData();
+    
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+    
+    if (applicationType) {
+      formData.append('application_type', applicationType);
+    }
 
-      const response = await apiClient.post(`/api/v1/applications/${applicationRef}/documents`, formData, {
+    const response = await apiClient.post(
+      `/api/v1/applications/${applicationRef}/documents/batch`,
+      formData,
+      {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total && onProgress) {
-            const fileProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            const totalProgress = Math.round(((i + (fileProgress / 100)) / files.length) * 100);
+            const totalProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             onProgress(totalProgress);
           }
         },
-      });
-      results.push(response.data);
-    }
+      }
+    );
     
-    // Return the last result (or first if you prefer)
-    return results[results.length - 1] || { run_id: null };
+    return response.data;
   },
 
   uploadApplicationRun: async (

@@ -23,7 +23,6 @@ import {
   Info,
   ContentCopy,
 } from '@mui/icons-material';
-import { api } from '../api/client';
 
 interface LLMCall {
   id: string;
@@ -43,9 +42,9 @@ interface LLMTransparencyProps {
 const LLMTransparency: React.FC<LLMTransparencyProps> = ({ runId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [llmCalls, setLlmCalls] = useState<LLMCall[]>([]);
-  const [totalTokens, setTotalTokens] = useState(0);
-  const [totalCost, setTotalCost] = useState(0);
+  const [llmCalls, _setLlmCalls] = useState<LLMCall[]>([]);
+  const [totalTokens, _setTotalTokens] = useState(0);
+  const [totalCost, _setTotalCost] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {

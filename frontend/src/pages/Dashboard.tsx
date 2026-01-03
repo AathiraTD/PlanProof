@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Box, Card, CardContent, Grid, Typography, Skeleton, Alert } from '@mui/material';
+import { Dashboard as DashboardIcon } from '@mui/icons-material';
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 
@@ -44,9 +45,12 @@ export default function Dashboard() {
   if (loading) {
     return (
       <Box>
-        <Typography variant="h4" gutterBottom fontWeight="bold">
-          📊 Dashboard
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <DashboardIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+          <Typography variant="h4" fontWeight="bold">
+            Dashboard
+          </Typography>
+        </Box>
         <Typography variant="body1" color="text.secondary" mb={3}>
           Analytics and insights
         </Typography>
@@ -74,9 +78,12 @@ export default function Dashboard() {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom fontWeight="bold">
-        📊 Dashboard
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <DashboardIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+        <Typography variant="h4" fontWeight="bold">
+          Dashboard
+        </Typography>
+      </Box>
       <Typography variant="body1" color="text.secondary" mb={3}>
         Analytics and insights
       </Typography>

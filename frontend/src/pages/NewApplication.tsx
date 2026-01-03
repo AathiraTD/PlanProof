@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -33,7 +33,7 @@ interface FileProgress {
 }
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB in bytes
-const APP_REF_PATTERN = /^[A-Z0-9\-\/]+$/i; // Allow alphanumeric, hyphens, slashes
+const APP_REF_PATTERN = /^[A-Z0-9\-\/\.\_ ]+$/i; // Allow alphanumeric, hyphens, slashes, dots, underscores, spaces
 
 export default function NewApplication() {
   const navigate = useNavigate();
@@ -54,27 +54,23 @@ export default function NewApplication() {
   const [fileProgress, setFileProgress] = useState<Map<string, FileProgress>>(new Map());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [createdApplicationId, setCreatedApplicationId] = useState<number | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
   const [loadingApplication, setLoadingApplication] = useState(false);
 
-  // Check backend health function
-  const checkBackendHealth = async () => {
-    try {
-      await fetch('http://localhost:8000/api/v1/health');
-      setBackendAvailable(true);
-    } catch (err) {
-      setBackendAvailable(false);
-      setError('Backend server is not running. Please start the backend server.');
-    }
-  };
-
-  // Check backend health on component mount
+  // Warn before leaving page during upload
   useEffect(() => {
-    checkBackendHealth();
-  }, []);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (uploading) {
+        e.preventDefault();
+        e.returnValue = 'Upload in progress. Are you sure you want to leave? Progress will be lost.';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [uploading]);
 
   useEffect(() => {
     const loadExistingApplication = async () => {
@@ -138,8 +134,11 @@ export default function NewApplication() {
       }
 
       // Check file size
+      const fileSizeMB = file.size / 1024 / 1024;
       if (file.size > MAX_FILE_SIZE) {
-        errors.push(`${file.name}: File size ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds limit of 200MB`);
+        errors.push(`${file.name}: File size ${fileSizeMB.toFixed(2)}MB exceeds maximum of 200MB`);
+      } else if (fileSizeMB > 100) {
+        errors.push(`${file.name}: Large file (${fileSizeMB.toFixed(2)}MB) - upload may take several minutes`);
       }
 
       // Check for 0-byte files
@@ -169,7 +168,7 @@ export default function NewApplication() {
     }
 
     if (!APP_REF_PATTERN.test(ref.trim())) {
-      errors.push('Application reference can only contain letters, numbers, hyphens, and slashes');
+      errors.push('Application reference contains invalid characters. Allowed: letters, numbers, hyphens, slashes, dots, underscores, spaces');
     }
 
     return errors;
@@ -295,14 +294,7 @@ export default function NewApplication() {
 
     try {
       let targetApplicationId = existingApplicationId ?? createdApplicationId;
-      if (!isVersionUpload) {
-        const created = await api.createApplication({
-          application_ref: applicationRef.trim(),
-          applicant_name: applicantName.trim() || undefined,
-        });
-        targetApplicationId = created.id ?? null;
-        setCreatedApplicationId(targetApplicationId);
-      }
+      let applicationCreated = false;
 
       // Upload files one by one with individual progress tracking
       let lastRunId: number | null = null;
@@ -310,6 +302,24 @@ export default function NewApplication() {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+
+        // Create application before first file upload (not for version uploads)
+        if (!isVersionUpload && !applicationCreated && i === 0) {
+          try {
+            const created = await api.createApplication({
+              application_ref: applicationRef.trim(),
+              applicant_name: applicantName.trim() || undefined,
+            });
+            targetApplicationId = created.id ?? null;
+            setCreatedApplicationId(targetApplicationId);
+            applicationCreated = true;
+          } catch (createErr: any) {
+            const createMessage = getApiErrorMessage(createErr, 'Failed to create application');
+            setError(`Application creation failed: ${createMessage}. No files uploaded.`);
+            setFileProgress(new Map()); // Clear progress
+            return; // Exit early without uploading any files
+          }
+        }
 
         // Update status to uploading
         setFileProgress((prev) => {
@@ -350,7 +360,6 @@ export default function NewApplication() {
 
           if (result.run_id) {
             lastRunId = result.run_id;
-            setLastRunId(result.run_id);
           }
         } catch (fileErr: any) {
           console.error(`Upload error for ${file.name}:`, fileErr);
@@ -374,23 +383,22 @@ export default function NewApplication() {
       if (failedFiles.length === 0) {
         setSuccess(true);
 
-        // Navigate to results after 3 seconds (give user time to see success)
-        setTimeout(() => {
-          if (lastRunId && targetApplicationId) {
-            navigate(`/applications/${targetApplicationId}/runs/${lastRunId}`);
-          } else {
-            navigate('/my-cases');
-          }
-        }, 3000);
+        // Navigate to results immediately - processing status will be shown there
+        if (lastRunId && targetApplicationId) {
+          navigate(`/applications/${targetApplicationId}/runs/${lastRunId}`);
+        } else {
+          navigate('/my-cases');
+        }
       } else {
-        setError(`${failedFiles.length} file(s) failed to upload. You can retry individual files below.`);
+        if (failedFiles.length < files.length) {
+          setError(`${failedFiles.length} file(s) failed to upload. ${files.length - failedFiles.length} file(s) uploaded successfully. You can retry failed files or remove them.`);
+        } else {
+          setError(`All files failed to upload. Please check the error messages below and try again.`);
+        }
       }
     } catch (err: any) {
       console.error('Upload error:', err);
       const message = getApiErrorMessage(err, 'Upload failed. Please try again.');
-      if (message.includes('network issue') || message.includes('CORS')) {
-        setBackendAvailable(false);
-      }
       setError(message);
     } finally {
       setUploading(false);
@@ -428,23 +436,6 @@ export default function NewApplication() {
         </Alert>
       )}
 
-      {/* Backend Status Alert */}
-      {backendAvailable === false && (
-        <Alert severity="error" sx={{ mb: 2 }} action={
-          <Button color="inherit" size="small" onClick={checkBackendHealth} startIcon={<Refresh />}>
-            Retry
-          </Button>
-        }>
-          <AlertTitle>Backend Offline</AlertTitle>
-          Cannot connect to backend server. Please ensure the backend is running on port 8000.
-        </Alert>
-      )}
-
-      {backendAvailable && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          Backend server is connected and healthy
-        </Alert>
-      )}
 
       <Card>
         <CardContent>
@@ -464,7 +455,7 @@ export default function NewApplication() {
               error={validationErrors.some(e => e.toLowerCase().includes('reference'))}
               helperText={isVersionUpload
                 ? 'Locked to the selected case.'
-                : 'Required. Alphanumeric, hyphens, and slashes allowed.'}
+                : 'Required. Most common formats supported (e.g., APP-2025-001, APP/2025/001, APP.2025.001)'}
             />
 
             {/* Applicant Name */}
@@ -579,16 +570,30 @@ export default function NewApplication() {
 
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           {progress?.status === 'error' && (
-                            <Tooltip title="Retry upload">
-                              <IconButton size="small" onClick={() => retryFile(file.name)} disabled={uploading}>
-                                <Refresh />
-                              </IconButton>
-                            </Tooltip>
+                            <>
+                              <Tooltip title="Retry upload">
+                                <IconButton size="small" onClick={() => retryFile(file.name)} disabled={uploading}>
+                                  <Refresh />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Remove file">
+                                <IconButton size="small" onClick={() => removeFile(index)} disabled={uploading}>
+                                  <Close />
+                                </IconButton>
+                              </Tooltip>
+                            </>
                           )}
                           {!uploading && !progress && (
                             <IconButton size="small" onClick={() => removeFile(index)}>
                               <Close />
                             </IconButton>
+                          )}
+                          {progress?.status === 'completed' && !uploading && (
+                            <Tooltip title="Remove file">
+                              <IconButton size="small" onClick={() => removeFile(index)}>
+                                <Close />
+                              </IconButton>
+                            </Tooltip>
                           )}
                         </Box>
                       </Box>
@@ -649,7 +654,7 @@ export default function NewApplication() {
               size="large"
               startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUpload />}
               onClick={handleSubmit}
-              disabled={uploading || loadingApplication || files.length === 0 || !applicationRef.trim() || backendAvailable === false}
+              disabled={uploading || loadingApplication || files.length === 0 || !applicationRef.trim()}
               fullWidth
             >
               {uploading ? 'Uploading...' : isVersionUpload ? 'Upload New Version' : 'Start Validation'}

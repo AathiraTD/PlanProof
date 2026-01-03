@@ -4,8 +4,8 @@ import {
   Box,
   Typography,
   Grid,
-  Chip,
   Alert,
+  AlertTitle,
   Button,
   Stack,
   List,
@@ -13,33 +13,25 @@ import {
   ListItemText,
   Paper,
   Container,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  IconButton,
-  Tooltip,
   Skeleton,
   LinearProgress,
-  TextField,
+  Chip,
 } from '@mui/material';
 import {
   RateReview,
   ArrowBack,
   Description,
-  Error,
-  Warning,
-  Info,
   CheckCircle,
-  ExpandMore,
   FindInPage,
-  ThumbUp,
-  ThumbDown,
+  Assignment,
 } from '@mui/icons-material';
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 import DocumentViewer from '../components/DocumentViewer';
 import LLMTransparency from '../components/LLMTransparency';
 import PriorApprovalDocs from '../components/PriorApprovalDocs';
+import ExtractedFieldsDisplay from '../components/ExtractedFieldsDisplay';
+import ValidationFindingsDisplay from '../components/ValidationFindingsDisplay';
 
 export default function Results() {
   const { applicationId, runId } = useParams<{ applicationId: string; runId: string }>();
@@ -49,62 +41,16 @@ export default function Results() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [downloadingReport, setDownloadingReport] = useState(false);
-  const [reclassifying, setReclassifying] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<any>(null);
-  const [evidenceFeedback, setEvidenceFeedback] = useState<Record<string, { comment: string; isRelevant?: boolean; saving?: boolean }>>({});
-
-  const getEvidenceKey = (findingId: number, evidence: any, index: number) => {
-    if (evidence?.id) {
-      return `evidence-${evidence.id}`;
-    }
-    return `finding-${findingId}-page-${evidence?.page ?? 'unknown'}-${evidence?.evidence_key ?? index}`;
-  };
-
-  const updateEvidenceFeedback = (key: string, updates: { comment?: string; isRelevant?: boolean; saving?: boolean }) => {
-    setEvidenceFeedback((prev) => ({
-      ...prev,
-      [key]: {
-        comment: '',
-        ...prev[key],
-        ...updates,
-      },
-    }));
-  };
-
-  const submitEvidenceFeedback = async (findingId: number, evidence: any, index: number, isRelevant: boolean) => {
-    if (!runId) return;
-    if (!evidence?.document_id) {
-      setError('Evidence is missing document details. Please refresh and try again.');
-      return;
-    }
-
-    const key = getEvidenceKey(findingId, evidence, index);
-    const comment = evidenceFeedback[key]?.comment ?? '';
-
-    updateEvidenceFeedback(key, { saving: true });
-    try {
-      await api.submitEvidenceFeedback(parseInt(runId), findingId, {
-        document_id: evidence.document_id,
-        page_number: evidence.page,
-        evidence_id: evidence.id,
-        is_relevant: isRelevant,
-        comment,
-      });
-      updateEvidenceFeedback(key, { isRelevant, saving: false });
-      setSuccessMessage('Evidence feedback saved.');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      updateEvidenceFeedback(key, { saving: false });
-      setError(getApiErrorMessage(err, 'Failed to save evidence feedback'));
-    }
-  };
+  const [runStatus, setRunStatus] = useState<string>('');
+  const [processingProgress, setProcessingProgress] = useState<number>(0);
 
   const loadResults = async (isBackground = false) => {
     if (!runId) return;
-    
+
     if (isBackground) {
       setRefreshing(true);
     } else {
@@ -114,6 +60,7 @@ export default function Results() {
     try {
       const data = await api.getRunResults(parseInt(runId));
       setResults(data);
+      setRunStatus(data.status || 'completed');
       sessionStorage.setItem(`run-results-${runId}`, JSON.stringify(data));
     } catch (err: any) {
       setError(getApiErrorMessage(err, 'Failed to load results'));
@@ -131,7 +78,9 @@ export default function Results() {
     const cachedResults = sessionStorage.getItem(`run-results-${runId}`);
     if (cachedResults) {
       try {
-        setResults(JSON.parse(cachedResults));
+        const parsed = JSON.parse(cachedResults);
+        setResults(parsed);
+        setRunStatus(parsed.status || 'completed');
         setLoading(false);
       } catch (err) {
         console.warn('Failed to parse cached run results:', err);
@@ -139,6 +88,32 @@ export default function Results() {
     }
     loadResults(Boolean(cachedResults));
   }, [runId]);
+
+  // Auto-refresh when processing
+  useEffect(() => {
+    if (!runId || !runStatus) return;
+
+    const isProcessing = ['pending', 'running'].includes(runStatus);
+    if (!isProcessing) return;
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setProcessingProgress(prev => {
+        if (prev >= 90) return 90; // Cap at 90% until actually complete
+        return prev + Math.random() * 10;
+      });
+    }, 2000);
+
+    // Poll for status updates
+    const pollInterval = setInterval(() => {
+      loadResults(true);
+    }, 5000); // Check every 5 seconds
+
+    return () => {
+      clearInterval(progressInterval);
+      clearInterval(pollInterval);
+    };
+  }, [runId, runStatus]);
 
   if (loading) {
     return (
@@ -198,24 +173,19 @@ export default function Results() {
 
   const summary = results.summary || {};
   const findings = results.findings || [];
+  const isProcessing = ['pending', 'running'].includes(runStatus);
 
-  // Group findings by severity/status
+  // Group findings by severity for stats display
   const criticalFindings = findings.filter((f: any) =>
-    ['critical', 'blocker', 'error'].includes(f.severity)
+    ['critical', 'blocker', 'error'].includes(f.severity?.toLowerCase())
   );
-  const warningFindings = findings.filter((f: any) => f.severity === 'warning');
+  const warningFindings = findings.filter((f: any) => f.severity?.toLowerCase() === 'warning');
   const needsReviewFindings = findings.filter((f: any) => f.status === 'needs_review');
-  const infoFindings = findings.filter((f: any) => f.severity === 'info' && f.status !== 'needs_review');
+  const infoFindings = findings.filter((f: any) => f.severity?.toLowerCase() === 'info');
 
   // Get unique documents
   const documents = results.documents || [];
   const hasReviewableFindings = needsReviewFindings.length > 0;
-
-  const getSeverityIcon = (severity: string) => {
-    if (['critical', 'blocker', 'error'].includes(severity)) return <Error color="error" />;
-    if (severity === 'warning') return <Warning color="warning" />;
-    return <Info color="info" />;
-  };
 
   const handleDownloadReport = async () => {
     if (!runId) return;
@@ -237,35 +207,30 @@ export default function Results() {
     }
   };
 
-  const handleReclassifyDocument = async (documentId: number, documentName: string, isCorrect: boolean) => {
-    if (!runId) return;
-    
-    const reclassifyKey = `${documentId}-${isCorrect}`;
-    setReclassifying(reclassifyKey);
-    setError('');
-    
-    try {
-      // For thumbs up: keep the current document type (confirm correct)
-      // For thumbs down: reclassify as 'incorrect' or 'other'
-      const newType = isCorrect ? documentName : 'incorrect';
-      
-      await api.reclassifyDocument(parseInt(runId), documentId, newType);
-      
-      setSuccessMessage(`Document ${isCorrect ? 'confirmed' : 'marked as incorrect'}`);
-      setTimeout(() => setSuccessMessage(''), 3000);
-      
-      // Refresh results to show updated candidate documents
-      await loadResults(true);
-    } catch (err: any) {
-      setError(getApiErrorMessage(err, 'Failed to reclassify document'));
-    } finally {
-      setReclassifying(null);
-    }
-  };
-
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+      {/* Processing Status Banner */}
+      {isProcessing && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <AlertTitle>Processing Documents...</AlertTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {runStatus === 'pending' ? 'Waiting to start processing...' : 'Extracting text and validating documents...'}
+              </Typography>
+              <LinearProgress variant="determinate" value={processingProgress} />
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              {Math.round(processingProgress)}%
+            </Typography>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            This page will automatically refresh when processing is complete.
+          </Typography>
+        </Alert>
+      )}
+
+      {refreshing && !isProcessing && <LinearProgress sx={{ mb: 2 }} />}
       {error && results && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {error}
@@ -276,15 +241,19 @@ export default function Results() {
           {successMessage}
         </Alert>
       )}
+
       {/* Header */}
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box>
-            <Typography variant="h4" gutterBottom>
-              📋 Run Results
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Assignment sx={{ fontSize: 32, color: 'primary.main' }} />
+              <Typography variant="h4">
+                Run Results
+              </Typography>
+            </Box>
             <Typography variant="body2" color="text.secondary">
-              Run ID: #{runId}
+              Run ID: #{runId} | Status: <Chip label={runStatus} size="small" color={isProcessing ? 'warning' : 'success'} />
             </Typography>
           </Box>
           <Stack direction="row" spacing={2}>
@@ -406,584 +375,31 @@ export default function Results() {
         )}
       </Paper>
 
-      {/* Extracted Fields */}
+      {/* Extracted Fields - NEW UX */}
       {results.extracted_fields && Object.keys(results.extracted_fields).length > 0 && (
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
             <FindInPage />
             Extracted Fields ({Object.keys(results.extracted_fields).length})
           </Typography>
-          <Grid container spacing={2}>
-            {Object.entries(results.extracted_fields).map(([fieldName, fieldData]: [string, any]) => (
-              <Grid item xs={12} sm={6} md={4} key={fieldName}>
-                <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 'bold' }}>
-                    {fieldName.replace(/_/g, ' ')}
-                  </Typography>
-                  <Typography variant="body1" sx={{ mt: 0.5, wordBreak: 'break-word' }}>
-                    {fieldData.value || 'N/A'}
-                  </Typography>
-                  {fieldData.confidence && (
-                    <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        Confidence:
-                      </Typography>
-                      <Chip
-                        label={`${(fieldData.confidence * 100).toFixed(0)}%`}
-                        size="small"
-                        color={fieldData.confidence >= 0.8 ? 'success' : fieldData.confidence >= 0.5 ? 'warning' : 'default'}
-                        sx={{ height: '20px', fontSize: '0.7rem' }}
-                      />
-                    </Box>
-                  )}
-                </Paper>
-              </Grid>
-            ))}
-          </Grid>
+          <ExtractedFieldsDisplay extractedFields={results.extracted_fields} />
         </Paper>
       )}
 
-      {/* Critical Findings */}
-      {criticalFindings.length > 0 && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom color="error.main">
-            Critical Issues ({criticalFindings.length})
-          </Typography>
-          <Stack spacing={2}>
-            {criticalFindings.map((finding: any, index: number) => (
-              <Box
-                key={index}
-                sx={{
-                  p: 2,
-                  border: '1px solid',
-                  borderColor: 'error.main',
-                  borderRadius: 1,
-                  borderLeft: '4px solid',
-                  borderLeftColor: 'error.main',
-                  backgroundColor: 'error.lighter',
-                }}
-              >
-                <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  {getSeverityIcon(finding.severity)}
-                  <Chip label={finding.severity} color="error" size="small" />
-                  <Chip label={finding.rule_id} size="small" variant="outlined" />
-                  {finding.document_name && (
-                    <Chip label={finding.document_name} size="small" icon={<Description />} />
-                  )}
-                </Box>
-                <Typography variant="body1" gutterBottom>
-                  {finding.message}
-                </Typography>
-                
-                {/* Evidence Details */}
-                {finding.evidence_details && finding.evidence_details.length > 0 && (
-                  <Accordion sx={{ mt: 2, backgroundColor: 'rgba(255,255,255,0.7)' }}>
-                    <AccordionSummary expandIcon={<ExpandMore />}>
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <FindInPage />
-                        <Typography variant="subtitle2">
-                          Evidence ({finding.evidence_details.length} items)
-                        </Typography>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Stack spacing={1}>
-                        {finding.evidence_details.map((evidence: any, evIndex: number) => {
-                          const feedbackKey = getEvidenceKey(finding.id, evidence, evIndex);
-                          const feedbackState = evidenceFeedback[feedbackKey] || { comment: '' };
-                          return (
-                            <Box
-                              key={evIndex}
-                              onClick={() => {
-                                setSelectedDocument({
-                                  id: evidence.document_id,
-                                  name: evidence.document_name || `Document ${evidence.document_id}`,
-                                });
-                                setSelectedEvidence(evidence);
-                                setViewerOpen(true);
-                              }}
-                              sx={{
-                                p: 1.5,
-                                backgroundColor: 'grey.50',
-                                borderRadius: 1,
-                                border: '1px solid',
-                                borderColor: 'grey.300',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                  backgroundColor: 'primary.50',
-                                  borderColor: 'primary.main',
-                                  transform: 'translateX(4px)',
-                                },
-                              }}
-                            >
-                              <Typography variant="caption" color="text.secondary">
-                                Page {evidence.page} {evidence.evidence_key && `• ${evidence.evidence_key}`}
-                              </Typography>
-                              <Typography variant="body2" sx={{ mt: 0.5, fontFamily: 'monospace' }}>
-                                "{evidence.snippet}"
-                              </Typography>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                                {evidence.confidence && (
-                                  <Chip
-                                    label={`Confidence: ${(evidence.confidence * 100).toFixed(0)}%`}
-                                    size="small"
-                                  />
-                                )}
-                                <Chip
-                                  icon={<FindInPage />}
-                                  label="View in document"
-                                  size="small"
-                                  color="primary"
-                                  variant="outlined"
-                                />
-                              </Box>
-                              <Box
-                                sx={{ mt: 1.5 }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                }}
-                              >
-                                <TextField
-                                  label="Evidence comment (optional)"
-                                  size="small"
-                                  fullWidth
-                                  value={feedbackState.comment}
-                                  onChange={(event) => updateEvidenceFeedback(feedbackKey, { comment: event.target.value })}
-                                />
-                                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                                  <Button
-                                    size="small"
-                                    variant={feedbackState.isRelevant === true ? 'contained' : 'outlined'}
-                                    startIcon={<ThumbUp />}
-                                    disabled={feedbackState.saving}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      submitEvidenceFeedback(finding.id, evidence, evIndex, true);
-                                    }}
-                                  >
-                                    Relevant
-                                  </Button>
-                                  <Button
-                                    size="small"
-                                    color="warning"
-                                    variant={feedbackState.isRelevant === false ? 'contained' : 'outlined'}
-                                    startIcon={<ThumbDown />}
-                                    disabled={feedbackState.saving}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      submitEvidenceFeedback(finding.id, evidence, evIndex, false);
-                                    }}
-                                  >
-                                    Not relevant
-                                  </Button>
-                                </Stack>
-                              </Box>
-                            </Box>
-                          );
-                        })}
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-
-                {/* Candidate Documents */}
-                {finding.candidate_documents && finding.candidate_documents.length > 0 && (
-                  <Accordion sx={{ mt: 1, backgroundColor: 'rgba(255,255,255,0.7)' }}>
-                    <AccordionSummary expandIcon={<ExpandMore />}>
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <Description />
-                        <Typography variant="subtitle2">
-                          Possible Matches ({finding.candidate_documents.length})
-                        </Typography>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                        Use 👍 to confirm a match or 👎 to flag an incorrect document.
-                      </Typography>
-                      <Stack spacing={1}>
-                        {finding.candidate_documents.map((doc: any, docIndex: number) => (
-                          <Box
-                            key={docIndex}
-                            sx={{
-                              p: 1.5,
-                              backgroundColor: doc.scanned ? 'success.lighter' : 'grey.100',
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: doc.scanned ? 'success.main' : 'grey.300',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Box>
-                              <Typography variant="body2" fontWeight="medium">
-                                {doc.document_name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {doc.reason}
-                              </Typography>
-                              {doc.confidence && (
-                                <Chip
-                                  label={`${(doc.confidence * 100).toFixed(0)}%`}
-                                  size="small"
-                                  sx={{ ml: 1 }}
-                                />
-                              )}
-                            </Box>
-                            <Box>
-                              <Tooltip title="Confirm correct document">
-                                <IconButton
-                                  size="small"
-                                  color="success"
-                                  onClick={() => handleReclassifyDocument(
-                                    doc.document_id,
-                                    doc.document_name,
-                                    true
-                                  )}
-                                  disabled={reclassifying === `${doc.document_id}-true`}
-                                >
-                                  <ThumbUp fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                              <Tooltip title="Mark as incorrect">
-                                <IconButton
-                                  size="small"
-                                  color="error"
-                                  onClick={() => handleReclassifyDocument(
-                                    doc.document_id,
-                                    doc.document_name,
-                                    false
-                                  )}
-                                  disabled={reclassifying === `${doc.document_id}-false`}
-                                >
-                                  <ThumbDown fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                          </Box>
-                        ))}
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-
-                {finding.details && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {JSON.stringify(finding.details, null, 2)}
-                  </Typography>
-                )}
-              </Box>
-            ))}
-          </Stack>
-        </Paper>
-      )}
-
-      {/* Warning Findings */}
-      {warningFindings.length > 0 && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom color="warning.main">
-            Warnings ({warningFindings.length})
-          </Typography>
-          <Stack spacing={2}>
-            {warningFindings.map((finding: any, index: number) => (
-              <Box
-                key={index}
-                sx={{
-                  p: 2,
-                  border: '1px solid',
-                  borderColor: 'warning.main',
-                  borderRadius: 1,
-                  borderLeft: '4px solid',
-                  borderLeftColor: 'warning.main',
-                }}
-              >
-                <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  {getSeverityIcon(finding.severity)}
-                  <Chip label={finding.severity} color="warning" size="small" />
-                  <Chip label={finding.rule_id} size="small" variant="outlined" />
-                  {finding.document_name && (
-                    <Chip label={finding.document_name} size="small" icon={<Description />} />
-                  )}
-                </Box>
-                <Typography variant="body1" gutterBottom>
-                  {finding.message}
-                </Typography>
-                
-                {/* Evidence Details */}
-                {finding.evidence_details && finding.evidence_details.length > 0 && (
-                  <Accordion sx={{ mt: 2, backgroundColor: 'rgba(255,255,255,0.7)' }}>
-                    <AccordionSummary expandIcon={<ExpandMore />}>
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <FindInPage />
-                        <Typography variant="subtitle2">
-                          Evidence ({finding.evidence_details.length} items)
-                        </Typography>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Stack spacing={1}>
-                        {finding.evidence_details.map((evidence: any, evIndex: number) => {
-                          const feedbackKey = getEvidenceKey(finding.id, evidence, evIndex);
-                          const feedbackState = evidenceFeedback[feedbackKey] || { comment: '' };
-                          return (
-                            <Box
-                              key={evIndex}
-                              onClick={() => {
-                                setSelectedDocument({
-                                  id: evidence.document_id,
-                                  name: evidence.document_name || `Document ${evidence.document_id}`,
-                                });
-                                setSelectedEvidence(evidence);
-                                setViewerOpen(true);
-                              }}
-                              sx={{
-                                p: 1.5,
-                                backgroundColor: 'grey.50',
-                                borderRadius: 1,
-                                border: '1px solid',
-                                borderColor: 'grey.300',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                  backgroundColor: 'primary.50',
-                                  borderColor: 'primary.main',
-                                  transform: 'translateX(4px)',
-                                },
-                              }}
-                            >
-                              <Typography variant="caption" color="text.secondary">
-                                Page {evidence.page} {evidence.evidence_key && `• ${evidence.evidence_key}`}
-                              </Typography>
-                              <Typography variant="body2" sx={{ mt: 0.5, fontFamily: 'monospace' }}>
-                                "{evidence.snippet}"
-                              </Typography>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                                {evidence.confidence && (
-                                  <Chip
-                                    label={`Confidence: ${(evidence.confidence * 100).toFixed(0)}%`}
-                                    size="small"
-                                  />
-                                )}
-                                <Chip
-                                  icon={<FindInPage />}
-                                  label="View in document"
-                                  size="small"
-                                  color="primary"
-                                  variant="outlined"
-                                />
-                              </Box>
-                              <Box
-                                sx={{ mt: 1.5 }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                }}
-                              >
-                                <TextField
-                                  label="Evidence comment (optional)"
-                                  size="small"
-                                  fullWidth
-                                  value={feedbackState.comment}
-                                  onChange={(event) => updateEvidenceFeedback(feedbackKey, { comment: event.target.value })}
-                                />
-                                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                                  <Button
-                                    size="small"
-                                    variant={feedbackState.isRelevant === true ? 'contained' : 'outlined'}
-                                    startIcon={<ThumbUp />}
-                                    disabled={feedbackState.saving}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      submitEvidenceFeedback(finding.id, evidence, evIndex, true);
-                                    }}
-                                  >
-                                    Relevant
-                                  </Button>
-                                  <Button
-                                    size="small"
-                                    color="warning"
-                                    variant={feedbackState.isRelevant === false ? 'contained' : 'outlined'}
-                                    startIcon={<ThumbDown />}
-                                    disabled={feedbackState.saving}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      submitEvidenceFeedback(finding.id, evidence, evIndex, false);
-                                    }}
-                                  >
-                                    Not relevant
-                                  </Button>
-                                </Stack>
-                              </Box>
-                            </Box>
-                          );
-                        })}
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-
-                {/* Candidate Documents */}
-                {finding.candidate_documents && finding.candidate_documents.length > 0 && (
-                  <Accordion sx={{ mt: 1, backgroundColor: 'rgba(255,255,255,0.7)' }}>
-                    <AccordionSummary expandIcon={<ExpandMore />}>
-                      <Typography variant="subtitle2">
-                        Possible Matches ({finding.candidate_documents.length})
-                      </Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                        Use 👍 to confirm a match or 👎 to flag an incorrect document.
-                      </Typography>
-                      <Stack spacing={1}>
-                        {finding.candidate_documents.map((doc: any, docIndex: number) => (
-                          <Box
-                            key={docIndex}
-                            sx={{
-                              p: 1.5,
-                              backgroundColor: doc.scanned ? 'success.lighter' : 'grey.100',
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: doc.scanned ? 'success.main' : 'grey.300',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Box>
-                              <Typography variant="body2" fontWeight="medium">
-                                {doc.document_name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {doc.reason}
-                              </Typography>
-                              {doc.confidence && (
-                                <Chip
-                                  label={`${(doc.confidence * 100).toFixed(0)}%`}
-                                  size="small"
-                                  sx={{ ml: 1 }}
-                                />
-                              )}
-                            </Box>
-                            <Box>
-                              <Tooltip title="Confirm correct document">
-                                <IconButton
-                                  size="small"
-                                  color="success"
-                                  onClick={() => handleReclassifyDocument(
-                                    doc.document_id,
-                                    doc.document_name,
-                                    true
-                                  )}
-                                  disabled={reclassifying === `${doc.document_id}-true`}
-                                >
-                                  <ThumbUp fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                              <Tooltip title="Mark as incorrect">
-                                <IconButton
-                                  size="small"
-                                  color="error"
-                                  onClick={() => handleReclassifyDocument(
-                                    doc.document_id,
-                                    doc.document_name,
-                                    false
-                                  )}
-                                  disabled={reclassifying === `${doc.document_id}-false`}
-                                >
-                                  <ThumbDown fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                          </Box>
-                        ))}
-                      </Stack>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-              </Box>
-            ))}
-          </Stack>
-        </Paper>
-      )}
-
-      {/* Info Findings */}
-      {infoFindings.length > 0 && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom color="info.main">
-            Informational ({infoFindings.length})
-          </Typography>
-          <Stack spacing={2}>
-            {infoFindings.map((finding: any, index: number) => (
-              <Box
-                key={index}
-                sx={{
-                  p: 2,
-                  border: '1px solid',
-                  borderColor: 'info.main',
-                  borderRadius: 1,
-                  borderLeft: '4px solid',
-                  borderLeftColor: 'info.main',
-                }}
-              >
-                <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  {getSeverityIcon(finding.severity)}
-                  <Chip label={finding.severity} color="info" size="small" />
-                  <Chip label={finding.rule_id} size="small" variant="outlined" />
-                  {finding.document_name && (
-                    <Chip label={finding.document_name} size="small" icon={<Description />} />
-                  )}
-                </Box>
-                <Typography variant="body1" gutterBottom>
-                  {finding.message}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-        </Paper>
-      )}
-
-      {/* Needs Review Findings */}
-      {needsReviewFindings.length > 0 && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom color="info.main">
-            Needs Human Review ({needsReviewFindings.length})
-          </Typography>
-          <Stack spacing={2}>
-            {needsReviewFindings.map((finding: any, index: number) => (
-              <Box
-                key={index}
-                sx={{
-                  p: 2,
-                  border: '1px solid',
-                  borderColor: 'info.main',
-                  borderRadius: 1,
-                  borderLeft: '4px solid',
-                  borderLeftColor: 'info.main',
-                }}
-              >
-                <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  {getSeverityIcon(finding.severity)}
-                  <Chip label={finding.severity} color="info" size="small" />
-                  <Chip label={finding.rule_id} size="small" variant="outlined" />
-                  {finding.document_name && (
-                    <Chip label={finding.document_name} size="small" icon={<Description />} />
-                  )}
-                </Box>
-                <Typography variant="body1" gutterBottom>
-                  {finding.message}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-        </Paper>
-      )}
-
-      {findings.length === 0 && (
-        <Alert severity="success" icon={<CheckCircle />}>
-          ✅ No issues found - all validation checks passed!
-        </Alert>
-      )}
+      {/* Validation Findings - NEW UX (Replaces all old findings sections) */}
+      <ValidationFindingsDisplay
+        findings={findings}
+        runId={runId ? parseInt(runId) : undefined}
+        applicationId={applicationId ? parseInt(applicationId) : undefined}
+        onViewDocument={(documentId, evidenceDetails) => {
+          setSelectedDocument({
+            id: documentId,
+            name: evidenceDetails?.document_name || `Document ${documentId}`,
+          });
+          setSelectedEvidence(evidenceDetails);
+          setViewerOpen(true);
+        }}
+      />
 
       {/* LLM Transparency Section */}
       {runId && (

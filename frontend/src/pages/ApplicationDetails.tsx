@@ -142,15 +142,6 @@ const ApplicationDetails: React.FC = () => {
   const [compareRunIdA, setCompareRunIdA] = useState<number | ''>('');
   const [compareRunIdB, setCompareRunIdB] = useState<number | ''>('');
   const [compareLoading, setCompareLoading] = useState(false);
-
-  const shouldRenderField = (value: unknown) => {
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed.length > 0 && trimmed.toLowerCase() !== 'not available';
-    }
-    return true;
-  };
   const [compareError, setCompareError] = useState('');
   const [comparison, setComparison] = useState<RunComparison | null>(null);
   const [runPage, setRunPage] = useState(0);
@@ -242,7 +233,7 @@ const ApplicationDetails: React.FC = () => {
       case 'failed':
         return <Error fontSize="small" />;
       default:
-        return null;
+        return undefined;
     }
   };
 

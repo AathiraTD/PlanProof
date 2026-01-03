@@ -1,0 +1,109 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  RESOURCE_GROUP: planproof-rg
+  ACR_NAME: planproofacr
+  BACKEND_APP_NAME: planproof-backend
+  FRONTEND_APP_NAME: planproof-frontend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name ${{ env.ACR_NAME }}
+      
+      - name: Get ACR login server
+        id: acr
+        run: |
+          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query loginServer -o tsv)
+          echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+      
+      - name: Build and push backend image
+        run: |
+          docker build \
+            -f infrastructure/docker/backend.Dockerfile \
+            -t ${{ steps.acr.outputs.login_server }}/planproof-backend:${{ github.sha }} \
+            -t ${{ steps.acr.outputs.login_server }}/planproof-backend:latest \
+            backend/
+          docker push ${{ steps.acr.outputs.login_server }}/planproof-backend:${{ github.sha }}
+          docker push ${{ steps.acr.outputs.login_server }}/planproof-backend:latest
+      
+      - name: Build and push frontend image
+        run: |
+          docker build \
+            -f frontend/Dockerfile \
+            -t ${{ steps.acr.outputs.login_server }}/planproof-frontend:${{ github.sha }} \
+            -t ${{ steps.acr.outputs.login_server }}/planproof-frontend:latest \
+            frontend/
+          docker push ${{ steps.acr.outputs.login_server }}/planproof-frontend:${{ github.sha }}
+          docker push ${{ steps.acr.outputs.login_server }}/planproof-frontend:latest
+      
+      - name: Deploy backend to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ steps.acr.outputs.login_server }}/planproof-backend:${{ github.sha }} \
+            --set-env-vars \
+              "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
+              "AZURE_STORAGE_CONTAINER_NAME=${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}" \
+              "AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
+              "AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}" \
+              "AZURE_OPENAI_CHAT_DEPLOYMENT=${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT }}" \
+              "AZURE_OPENAI_API_VERSION=${{ secrets.AZURE_OPENAI_API_VERSION }}" \
+              "AZURE_DOCINTEL_ENDPOINT=${{ secrets.AZURE_DOCINTEL_ENDPOINT }}" \
+              "AZURE_DOCINTEL_KEY=${{ secrets.AZURE_DOCINTEL_KEY }}" \
+              "JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}"
+      
+      - name: Get backend URL
+        id: backend
+        run: |
+          BACKEND_URL=$(az containerapp show \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "url=$BACKEND_URL" >> $GITHUB_OUTPUT
+      
+      - name: Deploy frontend to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ steps.acr.outputs.login_server }}/planproof-frontend:${{ github.sha }} \
+            --set-env-vars \
+              "VITE_API_BASE_URL=https://${{ steps.backend.outputs.url }}"
+      
+      - name: Get frontend URL
+        id: frontend
+        run: |
+          FRONTEND_URL=$(az containerapp show \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+      
+      - name: Deployment summary
+        run: |
+          echo "🎉 Deployment successful!"
+          echo ""
+          echo "Frontend: https://${{ steps.frontend.outputs.url }}"
+          echo "Backend: https://${{ steps.backend.outputs.url }}"
+          echo "API Docs: https://${{ steps.backend.outputs.url }}/api/docs"

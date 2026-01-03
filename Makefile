@@ -1,4 +1,4 @@
-.PHONY: help install install-dev setup test test-unit test-integration coverage lint format clean run migrate migrate-create db-init db-reset docker-build docker-up docker-down docs
+.PHONY: help install install-dev setup test test-unit test-integration coverage lint format clean run migrate migrate-create db-init db-reset docker-build docker-up docker-down docker-api-build docker-api-up docker-api-down docker-api-logs docker-api-restart docs
 
 # Default target
 help:
@@ -24,10 +24,17 @@ help:
 	@echo "  make migrate-create   - Create new migration (MSG='description')"
 	@echo "  make db-reset         - Reset database (WARNING: deletes all data)"
 	@echo ""
-	@echo "Docker:"
+	@echo "Docker (Streamlit UI):"
 	@echo "  make docker-build     - Build Docker image"
 	@echo "  make docker-up        - Start services with docker-compose"
 	@echo "  make docker-down      - Stop and remove containers"
+	@echo ""
+	@echo "Docker (FastAPI Backend):"
+	@echo "  make docker-api-build - Build API Docker image"
+	@echo "  make docker-api-up    - Start API backend with Docker"
+	@echo "  make docker-api-down  - Stop API backend"
+	@echo "  make docker-api-logs  - View API logs"
+	@echo "  make docker-api-restart - Restart API service"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean            - Remove cache files and artifacts"
@@ -105,6 +112,27 @@ docker-up:
 
 docker-down:
 	docker-compose down
+
+# Docker API (FastAPI Backend)
+docker-api-build:
+	docker-compose -f docker-compose.api.yml build
+	@echo "✓ API Docker image built"
+
+docker-api-up:
+	docker-compose -f docker-compose.api.yml up -d
+	@echo "✓ API started at http://localhost:8000"
+	@echo "  API Docs: http://localhost:8000/api/docs"
+
+docker-api-down:
+	docker-compose -f docker-compose.api.yml down
+	@echo "✓ API stopped"
+
+docker-api-logs:
+	docker-compose -f docker-compose.api.yml logs -f api
+
+docker-api-restart:
+	docker-compose -f docker-compose.api.yml restart api
+	@echo "✓ API restarted"
 
 # Utilities
 clean:

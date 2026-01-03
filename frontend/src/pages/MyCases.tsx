@@ -18,7 +18,7 @@ import {
   Skeleton,
   Stack,
 } from '@mui/material';
-import { Visibility, Refresh } from '@mui/icons-material';
+import { Visibility, Refresh, Assignment } from '@mui/icons-material';
 import { api } from '../api/client';
 import { getApiErrorMessage } from '../api/errorUtils';
 
@@ -43,10 +43,8 @@ export default function MyCases() {
     setError('');
     try {
       const data = await api.getApplications(pageToLoad, pageSize);
-      // API returns direct array, not wrapped object
-      const incomingCases = Array.isArray(data) ? data : (data.applications || []);
-      setCases((prev) => (replace ? incomingCases : [...prev, ...incomingCases]));
-      setHasMore(incomingCases.length === pageSize);
+      setCases((prev) => (replace ? data : [...prev, ...data]));
+      setHasMore(data.length === pageSize);
     } catch (err: any) {
       setError(getApiErrorMessage(err, 'Failed to load cases'));
     } finally {
@@ -84,9 +82,12 @@ export default function MyCases() {
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold">
-          📋 My Cases
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Assignment sx={{ fontSize: 32, color: 'primary.main' }} />
+          <Typography variant="h4" fontWeight="bold">
+            My Cases
+          </Typography>
+        </Box>
         <Button startIcon={<Refresh />} onClick={handleRefresh}>
           Refresh
         </Button>

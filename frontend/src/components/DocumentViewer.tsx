@@ -52,13 +52,13 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   documentName,
   initialPage = 1,
   evidence,
-  runId,
+  runId: _runId,
 }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [documentUrl, _setDocumentUrl] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(initialPage);
-  const [numPages, setNumPages] = useState<number | null>(null);
+  const [numPages, _setNumPages] = useState<number | null>(null);
   const [scale, setScale] = useState(1.0);
 
   useEffect(() => {
