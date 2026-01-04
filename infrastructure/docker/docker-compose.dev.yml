@@ -2,8 +2,8 @@ services:
   # Backend API (FastAPI) - Development Mode
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: infrastructure/docker/backend.Dockerfile
     container_name: planproof-backend-dev
     environment:
       # Use Azure PostgreSQL from .env
@@ -30,6 +30,9 @@ services:
       ENABLE_EXTRACTION_CACHE: ${ENABLE_EXTRACTION_CACHE:-true}
       ENABLE_LLM_GATE: ${ENABLE_LLM_GATE:-true}
       
+      # Database Migration Control
+      SKIP_MIGRATIONS: ${SKIP_MIGRATIONS:-false}
+      
       # Authentication
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
@@ -39,17 +42,17 @@ services:
       - "8000:8000"
     volumes:
       # Mount source code for hot reload
-      - ./planproof:/app/planproof
-      - ./main.py:/app/main.py
-      - ./run_api.py:/app/run_api.py
-      - ./alembic:/app/alembic
-      - ./runs:/app/runs
-      - ./artefacts:/app/artefacts
-      - ./data:/app/data
+      - ../../backend/planproof:/app/planproof
+      - ../../backend/main.py:/app/main.py
+      - ../../backend/run_api.py:/app/run_api.py
+      - ../../backend/alembic:/app/alembic
+      - ../../runs:/app/runs
+      - ../../artefacts:/app/artefacts
+      - ../../data:/app/data
     networks:
       - planproof-network
     restart: unless-stopped
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "planproof.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -63,13 +66,14 @@ services:
     container_name: planproof-frontend-dev
     working_dir: /app
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=
       - NODE_ENV=development
+      - DOCKER_ENV=true
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       # Mount source code for hot reload
-      - ./frontend:/app
+      - ../../frontend:/app
       - /app/node_modules
     networks:
       - planproof-network
