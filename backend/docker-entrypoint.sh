@@ -21,10 +21,22 @@ if [ -n "$DATABASE_URL" ]; then
         echo "✓ Database is ready"
     fi
     
-    # Run database migrations
-    echo "Running database migrations..."
-    alembic upgrade head || echo "Warning: Migration failed or not needed"
-    echo "✓ Migrations complete"
+    # Run database migrations (can be disabled with SKIP_MIGRATIONS=true)
+    if [ "$SKIP_MIGRATIONS" = "true" ]; then
+        echo "⚠ Skipping database migrations (SKIP_MIGRATIONS=true)"
+    else
+        # Run database migrations (with connection test first)
+        echo "Running database migrations..."
+        if python -c "from sqlalchemy import create_engine; import os; engine = create_engine(os.environ['DATABASE_URL']); conn = engine.connect(); conn.close(); print('Connection successful')" 2>/dev/null; then
+            echo "✓ Database connection verified"
+            alembic upgrade head || echo "⚠ Warning: Migration failed or not needed"
+            echo "✓ Migrations complete"
+        else
+            echo "⚠ Warning: Cannot connect to database - skipping migrations"
+            echo "  Application will start but database operations may fail"
+            echo "  Check your DATABASE_URL and network connectivity"
+        fi
+    fi
 fi
 
 # Execute the main command
